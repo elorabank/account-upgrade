@@ -19,7 +19,10 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
-/** Makes Okta-shaped access tokens signed with a throw-away key, and serves the matching JWKS over local HTTP. */
+/**
+ * Makes Keycloak-shaped access tokens (the provider used locally) signed with a throw-away key, and serves the
+ * matching JWKS over local HTTP. Okta-shaped tokens are covered by the converter and actor unit tests.
+ */
 public final class TestJwt {
 
     public static final String ISSUER = "https://issuer.test/oauth2/default";
@@ -57,16 +60,18 @@ public final class TestJwt {
         jwks.stop(0);
     }
 
-    /** A valid token for a signed-in user in the given Okta groups. */
+    /** A valid token for a signed-in user in the given groups. */
     public String user(String... groups) {
         return sign(signingKey, ISSUER, AUDIENCE, Instant.now().plusSeconds(300),
-            Map.of("groups", List.of(groups), "uid", "00u1", "email", "pat@bank.test"));
+            Map.of("groups", List.of(groups), "email", "pat@bank.test", "preferred_username", "pat", "azp", "api-gateway",
+                "scope", "openid profile email"));
     }
 
-    /** A valid client-credentials token carrying the given scopes (no groups, no uid). */
+    /** A valid client-credentials token carrying the given scopes (no groups, no person). */
     public String service(String clientId, String... scopes) {
         return sign(signingKey, ISSUER, AUDIENCE, Instant.now().plusSeconds(300),
-            Map.of("scp", List.of(scopes), "cid", clientId));
+            Map.of("scope", String.join(" ", scopes), "client_id", clientId, "azp", clientId,
+                "preferred_username", "service-account-" + clientId));
     }
 
     public String custom(String issuer, String audience, Instant expires) {

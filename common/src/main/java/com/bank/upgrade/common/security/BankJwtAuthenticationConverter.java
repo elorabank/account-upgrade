@@ -12,12 +12,14 @@ import org.springframework.security.oauth2.server.resource.authentication.Reacti
 import reactor.core.publisher.Mono;
 
 /**
- * Turns an Okta access token into authorities: each entry of the {@code groups} claim becomes
- * {@code ROLE_<group>} and each {@code scp} scope becomes {@code SCOPE_<scope>}.
+ * Turns an access token into authorities: each entry of the {@code groups} claim becomes {@code ROLE_<group>}, and
+ * each granted scope becomes {@code SCOPE_<scope>}. Scopes are read from the standard {@code scope} claim (a
+ * space-separated string, as Keycloak and Auth0 send it) or from {@code scp} (a list, as Okta sends it), so any of
+ * those identity providers works without code changes.
  */
-public final class OktaJwtAuthenticationConverter {
+public final class BankJwtAuthenticationConverter {
 
-    private OktaJwtAuthenticationConverter() {}
+    private BankJwtAuthenticationConverter() {}
 
     public static Converter<Jwt, Mono<AbstractAuthenticationToken>> reactive() {
         return new ReactiveJwtAuthenticationConverterAdapter(blocking());
@@ -28,8 +30,8 @@ public final class OktaJwtAuthenticationConverter {
         groups.setAuthoritiesClaimName("groups");
         groups.setAuthorityPrefix("ROLE_");
 
+        // No claim name set: Spring reads "scope", then "scp", and splits a space-separated string
         var scopes = new JwtGrantedAuthoritiesConverter();
-        scopes.setAuthoritiesClaimName("scp");
 
         var converter = new JwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(jwt -> {

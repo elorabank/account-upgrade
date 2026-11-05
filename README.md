@@ -16,16 +16,16 @@ Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 ## Run locally
 
 ```bash
-docker compose up -d      # Oracle, Kafka, SFTP, Mailpit, mock OAuth2 server
+docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak
 mvn clean verify          # build and test (tests never connect to this Kafka; see the surefire setting in each service pom)
 SPRING_PROFILES_ACTIVE=local mvn -pl file-ingestion-service spring-boot:run
 ```
 
 Run the services with the `local` profile. It holds the local database and SFTP logins, accepts the compose SFTP's
-changing host key, and takes tokens from the mock OAuth2 server instead of Okta. Without it a service has no
+changing host key, and uses Keycloak from docker-compose as the identity provider. Without it a service has no
 passwords and verifies the SFTP host key, which is what every real environment should do.
 
-Mailpit UI: http://localhost:8025 · Kafka UI: http://localhost:8070 · SFTP: localhost:2222 · Oracle: localhost:1521/FREEPDB1 · OAuth2 mock: http://localhost:8090/default
+Mailpit UI: http://localhost:8025 · Kafka UI: http://localhost:8070 · SFTP: localhost:2222 · Oracle: localhost:1521/FREEPDB1 · Keycloak: http://localhost:8180
 Schedules run in `bank.time-zone` (env `BANK_TIME_ZONE`, default `Asia/Kolkata`), never in the server's zone.
 Run Maven with JDK 21 (BlockHound does not work on newer JDKs yet).
 
@@ -43,25 +43,50 @@ The project SDK must be JDK 21, and annotation processing must be on (Lombok).
 for another day (each date gives new content) with `python3 samples/make_sample_accounts.py 20261111 10000`; it prints
 the counts to expect. Upload with `sftp -P 2222 bank@localhost` (password `bank_local_pw`), then `put <file> incoming/`.
 
-## Security (Okta)
+## Security (identity provider)
 
-Every service validates Okta access tokens (custom authorization server, audience `api://account-upgrade`).
-Okta groups become roles (`AU_OPS_ADMIN`, `AU_OPS_VIEWER`, `AU_SUPPORT`, `AU_AUDITOR`) and `scp` scopes
-(`upgrade.read`, `upgrade.admin`, `audit.read`, `notification.resend`) are accepted for service-to-service calls.
-The access matrix is in `common/.../security/ApiAccessRules.java`; any `/api/**` call without a rule is refused.
-`/internal/**` is for services only (a scope, never a role) and the gateway does not route it: today that is
-`GET /internal/files/{id}/accounts`, scope `staging.read`.
+Every service validates access tokens from one identity provider (audience `api://account-upgrade`). Locally that is
+**Keycloak** in docker-compose; the code also works with Okta or Auth0 (see below). Groups become roles
+(`AU_OPS_ADMIN`, `AU_OPS_VIEWER`, `AU_SUPPORT`, `AU_AUDITOR`) and granted scopes (`upgrade.read`, `upgrade.admin`,
+`audit.read`, `notification.resend`, `staging.read`) are accepted for service-to-service calls; scopes are read from the
+standard `scope` claim or Okta's `scp`. The access matrix is in `common/.../security/ApiAccessRules.java`; any `/api/**`
+call without a rule is refused. `/internal/**` is for services only (a scope, never a role) and the gateway does not
+route it: today that is `GET /internal/files/{id}/accounts`, scope `staging.read`.
+
+The gateway signs people in (authorization code + PKCE), keeps the session, and passes the user's access token to the
+services. Signing out ends the session at the identity provider too. Postman and other systems can send
+`Authorization: Bearer <token>` straight to the gateway.
+
+**Keycloak locally.** `docker compose up -d` starts Keycloak on http://localhost:8180 (admin console: admin / admin)
+and `keycloak-setup`, which creates the realm `account-upgrade` (`infra/keycloak/setup-realm.sh`):
+
+| User (password `local-pw`) | Group |
+|---|---|
+| `olivia.ops` | AU_OPS_ADMIN |
+| `victor.view` | AU_OPS_VIEWER |
+| `sam.support` | AU_SUPPORT |
+| `ada.audit` | AU_AUDITOR |
+
+| Client (secret `local-secret`) | Used by | May ask for |
+|---|---|---|
+| `api-gateway` | the gateway's login | the person's groups |
+| `account-upgrade-service` | the upgrade service, client credentials | `staging.read` |
+| `local-auditor` | you, to try the audit API with curl | `audit.read` |
+
+Keycloak keeps no data locally: when its container is recreated, `keycloak-setup` builds the realm again
+(`docker compose up -d keycloak-setup`).
+
+**Settings for a real environment**
 
 | Variable | Used by | Meaning |
 |---|---|---|
-| `OKTA_DOMAIN` | all | for example `your-org.okta.com` |
-| `OKTA_AUTH_SERVER_ID` | all | id of the custom authorization server (default `default`) |
-| `OKTA_GATEWAY_CLIENT_ID`, `OKTA_GATEWAY_CLIENT_SECRET` | gateway | OIDC web app for the admin UI |
-| `OKTA_UPGRADE_CLIENT_ID`, `OKTA_UPGRADE_CLIENT_SECRET` | upgrade | API service app (client credentials), allowed scope `staging.read` |
+| `IDP_ISSUER_URI` | all | the realm, for example `https://sso.bank.example/realms/account-upgrade` |
+| `IDP_CLIENT_ID`, `IDP_CLIENT_SECRET` | gateway, upgrade | that app's own client at the identity provider |
 
-The gateway signs users in (authorization code + PKCE), keeps the session, and passes the user's access token
-to the services. Postman and other systems can send `Authorization: Bearer <token>` straight to the gateway.
-Without these variables the apps still start, but every token check fails.
+Endpoints are derived from the issuer with Keycloak's paths. For **Okta or Auth0**, set the gateway's
+`spring.security.oauth2.client.provider.idp.*` endpoints, its `bank.gateway.idp-logout-uri`, and the upgrade service's
+`...provider.idp.token-uri` to that provider's addresses, and have the provider put the person's groups in a `groups`
+claim and `api://account-upgrade` in the access token's audience.
 
 ## Messaging (Kafka)
 
@@ -158,11 +183,11 @@ The table is insert-only (a trigger blocks UPDATE and DELETE) and kept forever, 
 | `from`, `to` | `2026-11-10T00:00:00Z` | a time window (`to` is exclusive) |
 | `page`, `size` | `0`, `50` | paging; `size` is capped at 200 |
 
-Locally, the mock OAuth2 server hands out an `audit.read` token:
+Locally, Keycloak's `local-auditor` client gets an `audit.read` token:
 
 ```bash
-TOKEN=$(curl -s -X POST http://localhost:8090/default/token -d grant_type=client_credentials \
-  -d client_id=local-auditor -d client_secret=x -d scope=audit.read | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+TOKEN=$(curl -s -X POST http://localhost:8180/realms/account-upgrade/protocol/openid-connect/token -d grant_type=client_credentials \
+  -d client_id=local-auditor -d client_secret=local-secret -d scope=audit.read | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
 curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8085/api/audit/events?eventType=FileLoaded" | python3 -m json.tool
 ```
 
@@ -180,13 +205,8 @@ http://localhost:8080 (through the gateway, after signing in). It calls the same
 
 Run now takes the same cluster lock as the schedule, so it answers 409 while that job is already running anywhere. Retry, resend and run now are recorded in the audit trail with the person's name.
 
-**Signing in locally.** With the `local` profile the gateway uses the mock OAuth2 server instead of Okta. On its login page type any user name and paste one of these into "claims":
-
-| Role | Claims |
-|---|---|
-| ops admin | `{"groups":["AU_OPS_ADMIN"],"email":"ops.admin@bank.example","uid":"local-1","name":"Olivia Ops"}` |
-| ops viewer | `{"groups":["AU_OPS_VIEWER"],"email":"viewer@bank.example","uid":"local-2","name":"Victor Viewer"}` |
-| support | `{"groups":["AU_SUPPORT"],"email":"support@bank.example","uid":"local-3","name":"Sam Support"}` |
-| auditor | `{"groups":["AU_AUDITOR"],"email":"auditor@bank.example","uid":"local-4","name":"Ada Auditor"}` |
+**Signing in locally.** With the `local` profile the gateway signs people in with Keycloak. Use one of the test users
+from the Security section (password `local-pw`): `olivia.ops` sees and can do everything, `victor.view` only looks,
+`sam.support` can also resend emails, `ada.audit` sees files, upgrades and the audit trail. Sign out to switch user.
 
 **Working on the UI.** `cd ops-ui && npm run watch` rebuilds into `ops-ui/target/classes/static` on every save; with the gateway running from IntelliJ, reload the page. `mvn verify` builds it with its own Node (`node.version` in the parent pom) and type-checks it first.

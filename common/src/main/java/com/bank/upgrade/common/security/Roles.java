@@ -1,6 +1,6 @@
 package com.bank.upgrade.common.security;
 
-/** Okta group names (sent in the {@code groups} claim) and API scopes (sent in {@code scp}), as Spring authorities. */
+/** Identity-provider group names (sent in the {@code groups} claim) and API scopes, as Spring authorities. */
 public final class Roles {
 
     public static final String OPS_ADMIN = "ROLE_AU_OPS_ADMIN";

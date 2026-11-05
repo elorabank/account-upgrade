@@ -1,18 +1,10 @@
-# Local development: sign in on the mock OAuth2 server from docker-compose instead of Okta. SPRING_PROFILES_ACTIVE=local
-# On its login page type any user name and paste the role in "claims", for example:
-#   {"groups":["AU_OPS_ADMIN"],"email":"ops.admin@bank.example","uid":"local-1","name":"Olivia Ops"}
+# Local development: sign in with Keycloak from docker-compose (http://localhost:8180). SPRING_PROFILES_ACTIVE=local
+# Users: olivia.ops (ops admin), victor.view (ops viewer), sam.support (support), ada.audit (auditor); password local-pw
 spring:
   security:
     oauth2:
       client:
         registration:
-          okta:
+          login:
             client-id: api-gateway
             client-secret: local-secret
-            scope: openid,profile,email
-        provider:
-          okta:
-            authorization-uri: http://localhost:8090/default/authorize
-            token-uri: http://localhost:8090/default/token
-            jwk-set-uri: http://localhost:8090/default/jwks
-            user-info-uri: http://localhost:8090/default/userinfo

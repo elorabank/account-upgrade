@@ -10,6 +10,3 @@ spring:
           service:
             client-id: account-upgrade-service
             client-secret: local-secret
-        provider:
-          okta:
-            token-uri: http://localhost:8090/default/token   # mock OAuth2 server in docker-compose

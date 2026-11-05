@@ -10,22 +10,23 @@ spring:
     oauth2:
       client:
         registration:
-          okta:
-            provider: okta
-            client-id: ${OKTA_GATEWAY_CLIENT_ID:gateway-not-configured}
-            client-secret: ${OKTA_GATEWAY_CLIENT_SECRET:}
+          login:
+            provider: idp
+            client-id: ${IDP_CLIENT_ID:gateway-not-configured}
+            client-secret: ${IDP_CLIENT_SECRET:}
             authorization-grant-type: authorization_code
             redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
             # Only identity scopes. API access comes from the user's groups, never from API scopes,
-            # so Okta cannot hand a viewer an admin scope by accident.
-            scope: openid,profile,email,offline_access
+            # so the identity provider cannot hand a viewer an admin scope by accident.
+            scope: openid,profile,email
         provider:
-          # Explicit endpoints (no startup call to Okta), same custom authorization server as the resource servers.
-          okta:
-            authorization-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}/v1/authorize
-            token-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}/v1/token
-            jwk-set-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}/v1/keys
-            user-info-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}/v1/userinfo
+          # Explicit endpoints (no startup call to the identity provider), Keycloak's paths under the shared issuer.
+          # For Okta or Auth0 set these four (and bank.gateway.idp-logout-uri) to that provider's endpoints.
+          idp:
+            authorization-uri: ${bank.idp.issuer-uri}/protocol/openid-connect/auth
+            token-uri: ${bank.idp.issuer-uri}/protocol/openid-connect/token
+            jwk-set-uri: ${bank.idp.issuer-uri}/protocol/openid-connect/certs
+            user-info-uri: ${bank.idp.issuer-uri}/protocol/openid-connect/userinfo
             user-name-attribute: sub
   cloud:
     gateway:
@@ -51,3 +52,9 @@ spring:
               uri: http://localhost:8085
               predicates:
                 - Path=/api/audit/**
+
+bank:
+  gateway:
+    # Signing out of the console also ends the session at the identity provider (OIDC RP-initiated logout);
+    # empty = only the gateway session ends
+    idp-logout-uri: ${bank.idp.issuer-uri}/protocol/openid-connect/logout

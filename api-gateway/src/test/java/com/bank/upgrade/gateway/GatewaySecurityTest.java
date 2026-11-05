@@ -2,6 +2,7 @@ package com.bank.upgrade.gateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockOAuth2Login;
+import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.csrf;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockOidcLogin;
 
 import com.bank.upgrade.test.TestJwt;
@@ -29,9 +30,8 @@ import org.springframework.test.web.reactive.server.WebTestClient;
     webEnvironment = SpringBootTest.WebEnvironment.MOCK,
     properties = {
         "spring.security.oauth2.resourceserver.jwt.issuer-uri=" + TestJwt.ISSUER,
-        "OKTA_DOMAIN=okta.test",
-        "OKTA_AUTH_SERVER_ID=default",
-        "OKTA_GATEWAY_CLIENT_ID=gateway-test-client"
+        "bank.idp.issuer-uri=https://idp.test/realms/account-upgrade",
+        "IDP_CLIENT_ID=gateway-test-client"
     })
 @AutoConfigureWebTestClient
 class GatewaySecurityTest {
@@ -115,31 +115,31 @@ class GatewaySecurityTest {
     }
 
     @Test
-    void pageNavigationWithoutLoginIsSentToOkta() {
+    void pageNavigationWithoutLoginIsSentToTheLogin() {
         web().get().uri("/").exchange()
             .expectStatus().is3xxRedirection()
-            .expectHeader().valueMatches("Location", ".*/oauth2/authorization/okta");
+            .expectHeader().valueMatches("Location", ".*/oauth2/authorization/login");
     }
 
     @Test
-    void loginRedirectGoesToOktaWithPkce() {
-        web().get().uri("/oauth2/authorization/okta").exchange()
+    void loginRedirectGoesToTheIdentityProviderWithPkce() {
+        web().get().uri("/oauth2/authorization/login").exchange()
             .expectStatus().is3xxRedirection()
             .expectHeader().value("Location", loc -> {
-                assertThat(loc).startsWith("https://okta.test/oauth2/default/v1/authorize?");
+                assertThat(loc).startsWith("https://idp.test/realms/account-upgrade/protocol/openid-connect/auth?");
                 assertThat(loc).contains("response_type=code", "client_id=gateway-test-client",
                     "code_challenge=", "code_challenge_method=S256");
-                assertThat(loc).contains("scope=openid%20profile%20email%20offline_access");
+                assertThat(loc).contains("scope=openid%20profile%20email");
                 assertThat(loc).doesNotContain("upgrade.admin");
             });
     }
 
     @Test
     void signedInUserGetsTheirAccessTokenRelayedAndTheSessionCookieStays() {
-        ClientRegistration okta = registrations.findByRegistrationId("okta").block();
+        ClientRegistration login = registrations.findByRegistrationId("login").block();
 
         // mockOAuth2Login() signs the user in with an authorized client whose access token is "access-token"
-        web().mutateWith(mockOAuth2Login().clientRegistration(okta))
+        web().mutateWith(mockOAuth2Login().clientRegistration(login))
             .get().uri("/api/files").header("Cookie", "SESSION=abc").exchange()
             .expectStatus().isOk();
 
@@ -154,16 +154,16 @@ class GatewaySecurityTest {
 
     @Test
     void postFromABrowserSessionNeedsACsrfToken() {
-        ClientRegistration okta = registrations.findByRegistrationId("okta").block();
-        web().mutateWith(mockOAuth2Login().clientRegistration(okta))
+        ClientRegistration login = registrations.findByRegistrationId("login").block();
+        web().mutateWith(mockOAuth2Login().clientRegistration(login))
             .post().uri("/api/jobs/upgrade/run").exchange().expectStatus().isForbidden();
         assertThat(DOWNSTREAM_CALLS.get()).isZero();
     }
 
     @Test
     void meShowsTheSignedInPersonsOwnGroupsOnly() {
-        ClientRegistration okta = registrations.findByRegistrationId("okta").block();
-        web().mutateWith(mockOidcLogin().clientRegistration(okta).idToken(t -> t
+        ClientRegistration login = registrations.findByRegistrationId("login").block();
+        web().mutateWith(mockOidcLogin().clientRegistration(login).idToken(t -> t
                 .subject("u1").claim("email", "sam@bank.example").claim("name", "Sam Support")
                 .claim("groups", List.of("AU_SUPPORT", "Everyone"))))
             .get().uri("/me").exchange()
@@ -181,8 +181,8 @@ class GatewaySecurityTest {
 
     @Test
     void theConsoleIsServedForItsOwnAddresses() {
-        ClientRegistration okta = registrations.findByRegistrationId("okta").block();
-        var signedIn = web().mutateWith(mockOidcLogin().clientRegistration(okta));
+        ClientRegistration login = registrations.findByRegistrationId("login").block();
+        var signedIn = web().mutateWith(mockOidcLogin().clientRegistration(login));
 
         for (String page : new String[] {"/", "/upgrades", "/files/12"}) {
             signedIn.get().uri(page).accept(MediaType.TEXT_HTML).exchange()
@@ -194,8 +194,8 @@ class GatewaySecurityTest {
 
     @Test
     void aPostWithTheCsrfCookieValueInTheHeaderGoesThrough() {
-        ClientRegistration okta = registrations.findByRegistrationId("okta").block();
-        var signedIn = web().mutateWith(mockOAuth2Login().clientRegistration(okta));
+        ClientRegistration login = registrations.findByRegistrationId("login").block();
+        var signedIn = web().mutateWith(mockOAuth2Login().clientRegistration(login));
 
         // Any browser request hands out the token as a readable cookie, as the app expects
         var cookie = signedIn.get().uri("/me").exchange().returnResult(String.class)
@@ -208,5 +208,18 @@ class GatewaySecurityTest {
             .header("X-XSRF-TOKEN", cookie.getValue())
             .exchange().expectStatus().isOk();
         assertThat(DOWNSTREAM_CALLS.get()).isEqualTo(1);
+    }
+
+    @Test
+    void signingOutAlsoEndsTheSessionAtTheIdentityProvider() {
+        ClientRegistration login = registrations.findByRegistrationId("login").block();
+
+        web().mutateWith(mockOidcLogin().clientRegistration(login)).mutateWith(csrf())
+            .post().uri("/logout").exchange()
+            .expectStatus().is3xxRedirection()
+            .expectHeader().value("Location", loc -> {
+                assertThat(loc).startsWith("https://idp.test/realms/account-upgrade/protocol/openid-connect/logout?");
+                assertThat(loc).contains("id_token_hint=", "post_logout_redirect_uri=");
+            });
     }
 }

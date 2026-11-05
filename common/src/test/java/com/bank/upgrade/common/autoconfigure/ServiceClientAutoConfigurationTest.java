@@ -21,7 +21,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 class ServiceClientAutoConfigurationTest {
 
-    HttpServer okta;
+    HttpServer tokenServer;
     HttpServer api;
     final AtomicInteger tokenCalls = new AtomicInteger();
     final AtomicReference<String> tokenRequestBody = new AtomicReference<>();
@@ -29,8 +29,8 @@ class ServiceClientAutoConfigurationTest {
 
     @BeforeEach
     void start() throws Exception {
-        okta = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        okta.createContext("/token", ex -> {
+        tokenServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        tokenServer.createContext("/token", ex -> {
             tokenCalls.incrementAndGet();
             tokenRequestBody.set(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] body = ("{\"access_token\":\"tok-" + tokenCalls.get() + "\",\"token_type\":\"Bearer\",\"expires_in\":3600,\"scope\":\"audit.read\"}")
@@ -40,7 +40,7 @@ class ServiceClientAutoConfigurationTest {
             ex.getResponseBody().write(body);
             ex.close();
         });
-        okta.start();
+        tokenServer.start();
         api = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         api.createContext("/data", ex -> {
             authHeaderSeenByApi.set(ex.getRequestHeaders().getFirst("Authorization"));
@@ -54,7 +54,7 @@ class ServiceClientAutoConfigurationTest {
 
     @AfterEach
     void stop() {
-        okta.stop(0);
+        tokenServer.stop(0);
         api.stop(0);
     }
 
@@ -62,7 +62,7 @@ class ServiceClientAutoConfigurationTest {
         ClientRegistration registration = ClientRegistration.withRegistrationId("audit-client")
             .clientId("svc-upgrade").clientSecret("local-test-secret")
             .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
-            .tokenUri("http://127.0.0.1:" + okta.getAddress().getPort() + "/token")
+            .tokenUri("http://127.0.0.1:" + tokenServer.getAddress().getPort() + "/token")
             .scope("audit.read").build();
         return new ApplicationContextRunner()
             .withBean(ReactiveClientRegistrationRepository.class, () -> new InMemoryReactiveClientRegistrationRepository(registration))
