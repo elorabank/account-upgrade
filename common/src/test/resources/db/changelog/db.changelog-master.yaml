@@ -1,0 +1,5 @@
+databaseChangeLog:
+  - include:
+      file: db/common/001-outbox-event.sql
+  - include:
+      file: db/common/002-processed-event.sql

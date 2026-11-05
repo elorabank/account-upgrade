@@ -1,0 +1,20 @@
+{
+  "interactiveLogin": true,
+  "tokenCallbacks": [
+    {
+      "issuerId": "default",
+      "tokenExpiry": 3600,
+      "requestMappings": [
+        {
+          "requestParam": "scope",
+          "match": "staging.read",
+          "claims": {
+            "sub": "account-upgrade-service",
+            "aud": ["api://account-upgrade"],
+            "scp": ["staging.read"]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+databaseChangeLog:
+  - include:
+      file: db/common/001-outbox-event.sql
+  - include:
+      file: db/common/003-shedlock.sql
+  - include:
+      file: db/common/004-spring-batch.sql
+  - include:
+      file: db/changelog/001-ingestion-tables.sql
+  - include:
+      file: db/changelog/003-staging-api-and-batch-restart.sql
+  - include:
+      file: db/changelog/005-drop-processed-event.sql

@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - include:
+      file: db/common/001-outbox-event.sql
+  - include:
+      file: db/common/002-processed-event.sql
+  - include:
+      file: db/changelog/001-communication-tables.sql
+  - include:
+      file: db/changelog/002-letter-delivery.sql
+  - include:
+      file: db/changelog/003-welcome-templates.sql

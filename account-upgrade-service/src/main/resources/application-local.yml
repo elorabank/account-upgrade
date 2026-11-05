@@ -1,0 +1,15 @@
+# Local development against docker-compose: SPRING_PROFILES_ACTIVE=local
+spring:
+  datasource:
+    username: upg_owner
+    password: upg_local_pw
+  security:
+    oauth2:
+      client:
+        registration:
+          service:
+            client-id: account-upgrade-service
+            client-secret: local-secret
+        provider:
+          okta:
+            token-uri: http://localhost:8090/default/token   # mock OAuth2 server in docker-compose

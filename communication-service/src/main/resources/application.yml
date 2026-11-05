@@ -1,0 +1,43 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: communication-service
+  config:
+    import: classpath:bank-defaults.yml, classpath:bank-persistence-defaults.yml, classpath:bank-messaging-defaults.yml
+  # Injected by the environment (Vault / secrets). Local values are in application-local.yml.
+  datasource:
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  # The bank's mail relay. Local values (Mailpit) are in application-local.yml.
+  mail:
+    host: ${SMTP_HOST:smtp-not-configured.invalid}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:true}
+      mail.smtp.starttls.enable: true
+      mail.smtp.starttls.required: true
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 30000
+      mail.smtp.writetimeout: 30000
+
+management:
+  health:
+    # A mail outage only delays letters (they stay PENDING and are retried); it must not mark the service DOWN
+    mail:
+      enabled: false
+
+bank:
+  processed-events:
+    enabled: true      # shared PROCESSED_EVENT table (consumer de-duplication)
+  outbox:
+    enabled: true      # shared OUTBOX_EVENT table
+  communication:
+    from: ${MAIL_FROM:no-reply@bank.example}
+    from-name: Example Bank
+    max-attempts: 5          # then FAILED and notification.failed
+    retry-delay: 1m          # 1m, 2m, 4m, 8m between attempts
+    poll-interval: PT5S

@@ -1,0 +1,10 @@
+--liquibase formatted sql
+
+--changeset bank:common-003-shedlock
+CREATE TABLE SHEDLOCK (
+    NAME       VARCHAR2(64 CHAR)  NOT NULL,
+    LOCK_UNTIL TIMESTAMP(3)       NOT NULL,
+    LOCKED_AT  TIMESTAMP(3)       NOT NULL,
+    LOCKED_BY  VARCHAR2(255 CHAR) NOT NULL,
+    CONSTRAINT PK_SHEDLOCK PRIMARY KEY (NAME)
+);

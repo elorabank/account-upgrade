@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Upgrade flow (all services)" type="CompoundRunConfigurationType">
+    <toRun name="account-upgrade-service (local)" type="Application" />
+    <toRun name="communication-service (local)" type="Application" />
+    <toRun name="file-ingestion-service (local)" type="Application" />
+    <method v="2" />
+  </configuration>
+</component>

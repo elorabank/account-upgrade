@@ -1,0 +1,14 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="account-upgrade-service (local)" type="Application" factoryName="Application">
+    <envs>
+      <env name="SPRING_PROFILES_ACTIVE" value="local" />
+      <!-- 30 seconds past every minute instead of 03:00 -->
+      <env name="BANK_UPGRADE_SCHEDULE_CRON" value="30 * * * * *" />
+    </envs>
+    <option name="MAIN_CLASS_NAME" value="com.bank.upgrade.upgrade.AccountUpgradeApplication" />
+    <module name="account-upgrade-service" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

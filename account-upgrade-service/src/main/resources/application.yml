@@ -1,0 +1,48 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: account-upgrade-service
+  config:
+    import: classpath:bank-defaults.yml, classpath:bank-persistence-defaults.yml, classpath:bank-messaging-defaults.yml
+  # Injected by the environment (Vault / secrets). Local values are in application-local.yml.
+  datasource:
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  security:
+    oauth2:
+      client:
+        # This service's own Okta client (client credentials). It may only ask for staging.read.
+        registration:
+          service:
+            provider: okta
+            client-id: ${OKTA_UPGRADE_CLIENT_ID:upgrade-client-not-configured}
+            client-secret: ${OKTA_UPGRADE_CLIENT_SECRET:}
+            authorization-grant-type: client_credentials
+            scope: staging.read
+        provider:
+          okta:
+            token-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}/v1/token
+
+bank:
+  processed-events:
+    enabled: true      # shared PROCESSED_EVENT table (consumer de-duplication)
+  outbox:
+    enabled: true      # shared OUTBOX_EVENT table
+  scheduler-lock:
+    enabled: true      # SHEDLOCK table
+  security:
+    client:
+      registration-id: service   # client-credentials token for calls to other services
+  upgrade:
+    ingestion-url: ${INGESTION_URL:http://localhost:8081}
+    schedule:
+      cron: "0 0 3 * * *"      # daily at 03:00 in bank.time-zone
+    # Draft rules until the business confirms them
+    rules:
+      required-kyc-status: VERIFIED
+      min-balance: 0
+      target-types:
+        SAVINGS: SAVINGS_PLUS
+        CURRENT: CURRENT_PLUS

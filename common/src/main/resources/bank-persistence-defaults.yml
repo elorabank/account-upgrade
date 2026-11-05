@@ -1,0 +1,29 @@
+# Shared JPA / Oracle / Spring Batch settings. A service sets only its own DB user and password.
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:oracle:thin:@//localhost:1521/FREEPDB1}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+        # No runtime DDL: stop Hibernate creating HTE_* temp tables for bulk updates
+        query:
+          mutation_strategy:
+            global_temporary:
+              create_tables: false
+              drop_tables: false
+  # Liquibase uses the default classpath:db/changelog/db.changelog-master.yaml
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: never
+      # Spring Batch defaults to SERIALIZABLE for its job repository, which Oracle answers with ORA-08177
+      isolation-level-for-create: read_committed

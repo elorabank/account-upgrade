@@ -1,0 +1,12 @@
+# Local development against docker-compose: SPRING_PROFILES_ACTIVE=local
+spring:
+  datasource:
+    username: ing_owner
+    password: ing_local_pw
+
+bank:
+  ingestion:
+    sftp:
+      username: bank
+      password: bank_local_pw
+      trust-any-host-key: true   # the compose SFTP gets a new host key when recreated

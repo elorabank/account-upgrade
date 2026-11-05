@@ -1,0 +1,35 @@
+# Shared by every app. Okta values come from the environment; the .invalid host makes a missing
+# configuration fail loudly instead of calling a real server.
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}
+          audiences: api://account-upgrade
+
+bank:
+  # The bank's time zone: the 01:00 and 03:00 schedules run in it. Containers usually run in UTC, so never rely on the server's zone.
+  time-zone: ${BANK_TIME_ZONE:Asia/Kolkata}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+logging:
+  pattern:
+    # the correlation id replaces Spring Boot's default [app,trace,span] block
+    correlation: "[%X{correlationId:-}] "
+---
+# Local development: tokens come from the mock OAuth2 server in docker-compose instead of Okta
+spring:
+  config:
+    activate:
+      on-profile: local
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8090/default

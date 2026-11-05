@@ -1,0 +1,14 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="file-ingestion-service (local)" type="Application" factoryName="Application">
+    <envs>
+      <env name="SPRING_PROFILES_ACTIVE" value="local" />
+      <!-- every minute instead of 01:00, so an uploaded file is picked up quickly -->
+      <env name="BANK_INGESTION_SCHEDULE_CRON" value="0 * * * * *" />
+    </envs>
+    <option name="MAIN_CLASS_NAME" value="com.bank.upgrade.ingestion.FileIngestionApplication" />
+    <module name="file-ingestion-service" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

@@ -1,0 +1,6 @@
+# Shared Kafka settings (see KafkaClientProperties). Real environments override with BANK_KAFKA_* variables.
+# Built-in defaults: producer acks=all + idempotence; consumer auto-commit off, earliest offset.
+bank:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    group-id: ${spring.application.name}

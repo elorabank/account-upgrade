@@ -1,0 +1,12 @@
+# Local development against docker-compose: SPRING_PROFILES_ACTIVE=local
+spring:
+  datasource:
+    username: com_owner
+    password: com_local_pw
+  mail:
+    host: localhost
+    port: 1025          # Mailpit in docker-compose; see the emails at http://localhost:8025
+    properties:
+      mail.smtp.auth: false
+      mail.smtp.starttls.enable: false
+      mail.smtp.starttls.required: false

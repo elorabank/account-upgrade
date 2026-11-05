@@ -1,0 +1,53 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  config:
+    import: classpath:bank-defaults.yml
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            provider: okta
+            client-id: ${OKTA_GATEWAY_CLIENT_ID:gateway-not-configured}
+            client-secret: ${OKTA_GATEWAY_CLIENT_SECRET:}
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            # Only identity scopes. API access comes from the user's groups, never from API scopes,
+            # so Okta cannot hand a viewer an admin scope by accident.
+            scope: openid,profile,email,offline_access
+        provider:
+          # Explicit endpoints (no startup call to Okta), same custom authorization server as the resource servers.
+          okta:
+            authorization-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}/v1/authorize
+            token-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}/v1/token
+            jwk-set-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}/v1/keys
+            user-info-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}/v1/userinfo
+            user-name-attribute: sub
+  cloud:
+    gateway:
+      server:
+        webflux:
+          default-filters:
+            - TokenRelay=              # signed-in users: send their access token downstream
+            - RemoveRequestHeader=Cookie   # the browser session stays at the gateway
+          routes:
+            - id: ingestion
+              uri: http://localhost:8081
+              predicates:
+                - Path=/api/files/**,/api/jobs/ingestion/**
+            - id: upgrade
+              uri: http://localhost:8082
+              predicates:
+                - Path=/api/upgrades/**,/api/jobs/upgrade/**
+            - id: communication
+              uri: http://localhost:8083
+              predicates:
+                - Path=/api/notifications/**
+            - id: audit
+              uri: http://localhost:8085
+              predicates:
+                - Path=/api/audit/**

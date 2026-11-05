@@ -1,0 +1,5 @@
+# Local development against docker-compose: SPRING_PROFILES_ACTIVE=local
+spring:
+  datasource:
+    username: aud_owner
+    password: aud_local_pw

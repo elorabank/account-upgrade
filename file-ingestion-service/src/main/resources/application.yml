@@ -1,0 +1,28 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: file-ingestion-service
+  config:
+    import: classpath:bank-defaults.yml, classpath:bank-persistence-defaults.yml, classpath:bank-messaging-defaults.yml
+  # Injected by the environment (Vault / secrets). Local values are in application-local.yml.
+  datasource:
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+
+bank:
+  outbox:
+    enabled: true      # shared OUTBOX_EVENT table
+  scheduler-lock:
+    enabled: true      # SHEDLOCK table
+  ingestion:
+    chunk-size: 500
+    schedule:
+      cron: "0 0 1 * * *"      # daily at 01:00 in bank.time-zone
+    sftp:
+      host: ${SFTP_HOST:localhost}
+      port: ${SFTP_PORT:2222}
+      username: ${SFTP_USER:}
+      password: ${SFTP_PASSWORD:}
+      host-key-fingerprint: ${SFTP_HOST_KEY:}   # required outside local development

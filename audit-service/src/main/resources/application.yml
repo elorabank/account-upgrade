@@ -1,0 +1,16 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: audit-service
+  config:
+    import: classpath:bank-defaults.yml, classpath:bank-persistence-defaults.yml, classpath:bank-messaging-defaults.yml
+  # Injected by the environment (Vault / secrets). Local values are in application-local.yml.
+  datasource:
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+
+bank:
+  processed-events:
+    enabled: true      # shared PROCESSED_EVENT table (consumer de-duplication)
