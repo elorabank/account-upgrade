@@ -7,7 +7,21 @@ import com.bank.upgrade.common.persistence.BlockingJpa;
 import com.bank.upgrade.common.security.ActorResolver;
 import com.bank.upgrade.communication.domain.WelcomeLetter;
 import com.bank.upgrade.communication.domain.WelcomeLetterRepository;
+import com.bank.upgrade.common.api.PageView;
+import jakarta.persistence.criteria.Predicate;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,14 +30,28 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 
 /**
- * {@code POST /api/notifications/{id}/resend}: send a welcome letter again, for example after the customer
- * changed their email or says it never arrived. Allowed for ops admins and support (see ApiAccessRules).
- * The letter goes back to PENDING with a fresh set of attempts, and the request is recorded for the audit trail.
+ * Welcome emails for the ops console. {@code GET /api/notifications} lists them (newest first, by status or account),
+ * {@code GET /api/notifications/summary} counts them by status, and {@code POST /api/notifications/{id}/resend} sends
+ * one again, for example after the customer changed their email or says it never arrived (ops admins and support).
+ * A resent letter goes back to PENDING with a fresh set of attempts, and the request is recorded for the audit trail.
  */
 @RestController
 public class NotificationController {
 
     public record ResendAccepted(long id, String status) {}
+
+    public record LetterView(
+            long id, long upgradeRequestId, String accountNo, String recipient, String subject, String status,
+            int attempts, String errorMessage, Instant generatedAt, Instant sentAt, Instant nextAttemptAt) {
+
+        static LetterView of(WelcomeLetter l) {
+            return new LetterView(l.getId(), l.getUpgradeRequestId(), l.getAccountNo(), l.getRecipient(), l.getSubject(),
+                l.getStatus(), l.getAttempts(), l.getErrorMessage(), l.getGeneratedAt(), l.getSentAt(), l.getNextAttemptAt());
+        }
+    }
+
+    /** @param since letters generated from this moment (default: the last 24 hours) */
+    public record Summary(Instant since, Map<String, Long> byStatus, long total) {}
 
     private final WelcomeLetterRepository letters;
     private final OutboxService outbox;
@@ -33,6 +61,36 @@ public class NotificationController {
         this.letters = letters;
         this.outbox = outbox;
         this.jpa = jpa;
+    }
+
+    @GetMapping("/api/notifications")
+    public Mono<PageView<LetterView>> list(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String accountNo,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        var request = PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 200), Sort.by(Sort.Order.desc("id")));
+        Specification<WelcomeLetter> filter = (root, query, cb) -> {
+            List<Predicate> where = new ArrayList<>();
+            if (status != null && !status.isBlank()) where.add(cb.equal(root.get("status"), status));
+            if (accountNo != null && !accountNo.isBlank()) where.add(cb.equal(root.get("accountNo"), accountNo.trim()));
+            return cb.and(where.toArray(Predicate[]::new));
+        };
+        return jpa.call(() -> letters.findAll(filter, request)).map(result -> PageView.of(result, LetterView::of));
+    }
+
+    @GetMapping("/api/notifications/summary")
+    public Mono<Summary> summary(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant since) {
+        Instant from = since != null ? since : Instant.now().minus(Duration.ofDays(1));
+        return jpa.call(() -> {
+            Map<String, Long> counts = new LinkedHashMap<>();
+            List.of(WelcomeLetter.PENDING, WelcomeLetter.SENT, WelcomeLetter.FAILED).forEach(s -> counts.put(s, 0L));
+            for (Object[] row : letters.countByStatusSince(from)) {
+                counts.put((String) row[0], (Long) row[1]);
+            }
+            return new Summary(from, counts, counts.values().stream().mapToLong(Long::longValue).sum());
+        });
     }
 
     @PostMapping("/api/notifications/{id}/resend")

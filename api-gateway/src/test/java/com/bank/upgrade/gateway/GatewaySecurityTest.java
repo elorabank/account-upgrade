@@ -2,12 +2,15 @@ package com.bank.upgrade.gateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockOAuth2Login;
+import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockOidcLogin;
 
 import com.bank.upgrade.test.TestJwt;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
+import org.springframework.http.MediaType;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
@@ -155,5 +158,55 @@ class GatewaySecurityTest {
         web().mutateWith(mockOAuth2Login().clientRegistration(okta))
             .post().uri("/api/jobs/upgrade/run").exchange().expectStatus().isForbidden();
         assertThat(DOWNSTREAM_CALLS.get()).isZero();
+    }
+
+    @Test
+    void meShowsTheSignedInPersonsOwnGroupsOnly() {
+        ClientRegistration okta = registrations.findByRegistrationId("okta").block();
+        web().mutateWith(mockOidcLogin().clientRegistration(okta).idToken(t -> t
+                .subject("u1").claim("email", "sam@bank.example").claim("name", "Sam Support")
+                .claim("groups", List.of("AU_SUPPORT", "Everyone"))))
+            .get().uri("/me").exchange()
+            .expectStatus().isOk().expectBody()
+            .jsonPath("$.name").isEqualTo("Sam Support")
+            .jsonPath("$.email").isEqualTo("sam@bank.example")
+            .jsonPath("$.roles.length()").isEqualTo(1)
+            .jsonPath("$.roles[0]").isEqualTo("AU_SUPPORT");
+    }
+
+    @Test
+    void meWithoutLoginIs401SoTheAppCanSendThePersonToTheLogin() {
+        web().get().uri("/me").exchange().expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void theConsoleIsServedForItsOwnAddresses() {
+        ClientRegistration okta = registrations.findByRegistrationId("okta").block();
+        var signedIn = web().mutateWith(mockOidcLogin().clientRegistration(okta));
+
+        for (String page : new String[] {"/", "/upgrades", "/files/12"}) {
+            signedIn.get().uri(page).accept(MediaType.TEXT_HTML).exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class).value(html -> assertThat(html).contains("<div id=\"root\">"));
+        }
+        assertThat(DOWNSTREAM_CALLS.get()).isZero();
+    }
+
+    @Test
+    void aPostWithTheCsrfCookieValueInTheHeaderGoesThrough() {
+        ClientRegistration okta = registrations.findByRegistrationId("okta").block();
+        var signedIn = web().mutateWith(mockOAuth2Login().clientRegistration(okta));
+
+        // Any browser request hands out the token as a readable cookie, as the app expects
+        var cookie = signedIn.get().uri("/me").exchange().returnResult(String.class)
+            .getResponseCookies().getFirst("XSRF-TOKEN");
+        assertThat(cookie).isNotNull();
+        assertThat(cookie.isHttpOnly()).isFalse();
+
+        signedIn.post().uri("/api/jobs/upgrade/run")
+            .cookie("XSRF-TOKEN", cookie.getValue())
+            .header("X-XSRF-TOKEN", cookie.getValue())
+            .exchange().expectStatus().isOk();
+        assertThat(DOWNSTREAM_CALLS.get()).isEqualTo(1);
     }
 }

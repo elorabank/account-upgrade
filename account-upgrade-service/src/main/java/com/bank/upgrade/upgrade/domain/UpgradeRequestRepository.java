@@ -4,14 +4,22 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface UpgradeRequestRepository extends JpaRepository<UpgradeRequest, Long> {
+public interface UpgradeRequestRepository extends JpaRepository<UpgradeRequest, Long>, JpaSpecificationExecutor<UpgradeRequest> {
     List<UpgradeRequest> findByRunId(String runId);
 
     long countByStatusAndBusinessDate(String status, LocalDate businessDate);
+
+    @Query("select max(r.businessDate) from UpgradeRequest r")
+    LocalDate findLatestBusinessDate();
+
+    /** Rows of [status, count] for one business day. */
+    @Query("select r.status, count(r) from UpgradeRequest r where r.businessDate = :date group by r.status")
+    List<Object[]> countByStatus(@Param("date") LocalDate date);
 
     @Query("select r.accountNo from UpgradeRequest r where r.businessDate = :date")
     Set<String> findAccountNosByBusinessDate(@Param("date") LocalDate date);

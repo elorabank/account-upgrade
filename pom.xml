@@ -23,6 +23,7 @@
     <module>account-upgrade-service</module>
     <module>communication-service</module>
     <module>audit-service</module>
+    <module>ops-ui</module>
     <module>api-gateway</module>
   </modules>
 
@@ -36,6 +37,8 @@
     <sshj.version>0.41.2</sshj.version>
     <poi.version>6.0.0</poi.version>
     <excel-streaming-reader.version>6.0.0</excel-streaming-reader.version>
+    <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
+    <node.version>v22.12.0</node.version>
   </properties>
 
   <dependencyManagement>
@@ -55,6 +58,11 @@
       <dependency>
         <groupId>com.bank.upgrade</groupId>
         <artifactId>common-test</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.bank.upgrade</groupId>
+        <artifactId>ops-ui</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

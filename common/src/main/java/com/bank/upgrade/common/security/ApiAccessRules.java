@@ -30,6 +30,8 @@ public final class ApiAccessRules {
             .pathMatchers(HttpMethod.GET, "/api/files/**", "/api/upgrades/**")
                 .hasAnyAuthority(OPS_ADMIN, OPS_VIEWER, SUPPORT, AUDITOR, SCOPE_UPGRADE_READ)
             .pathMatchers(HttpMethod.GET, "/api/audit/**").hasAnyAuthority(OPS_ADMIN, AUDITOR, SCOPE_AUDIT_READ)
+            // emails show the recipient address: the people who handle customer contact, not auditors
+            .pathMatchers(HttpMethod.GET, "/api/notifications/**").hasAnyAuthority(OPS_ADMIN, OPS_VIEWER, SUPPORT)
 
             // everything else under /api is closed until a rule is added above
             .pathMatchers("/api/**").denyAll()

@@ -3,6 +3,7 @@
     <toRun name="account-upgrade-service (local)" type="Application" />
     <toRun name="communication-service (local)" type="Application" />
     <toRun name="audit-service (local)" type="Application" />
+    <toRun name="api-gateway (local)" type="Application" />
     <toRun name="file-ingestion-service (local)" type="Application" />
     <method v="2" />
   </configuration>

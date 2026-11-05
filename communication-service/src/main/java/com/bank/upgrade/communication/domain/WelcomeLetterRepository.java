@@ -3,15 +3,20 @@ package com.bank.upgrade.communication.domain;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface WelcomeLetterRepository extends JpaRepository<WelcomeLetter, Long> {
+public interface WelcomeLetterRepository extends JpaRepository<WelcomeLetter, Long>, JpaSpecificationExecutor<WelcomeLetter> {
     List<WelcomeLetter> findByAccountNo(String accountNo);
 
     long countByStatus(String status);
 
     boolean existsByUpgradeRequestId(Long upgradeRequestId);
+
+    /** Rows of [status, count] for letters generated since {@code since}. */
+    @Query("select l.status, count(l) from WelcomeLetter l where l.generatedAt >= :since group by l.status")
+    List<Object[]> countByStatusSince(@Param("since") Instant since);
 
     /**
      * Locks the PENDING letters that are due, oldest first. SKIP LOCKED means a second instance sending at the same time
