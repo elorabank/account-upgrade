@@ -10,8 +10,25 @@
           "match": "staging.read",
           "claims": {
             "sub": "account-upgrade-service",
-            "aud": ["api://account-upgrade"],
-            "scp": ["staging.read"]
+            "aud": [
+              "api://account-upgrade"
+            ],
+            "scp": [
+              "staging.read"
+            ]
+          }
+        },
+        {
+          "requestParam": "scope",
+          "match": "audit.read",
+          "claims": {
+            "sub": "local-auditor",
+            "aud": [
+              "api://account-upgrade"
+            ],
+            "scp": [
+              "audit.read"
+            ]
           }
         }
       ]

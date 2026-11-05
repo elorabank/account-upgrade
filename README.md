@@ -9,7 +9,7 @@ Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 | file-ingestion-service | 8081 | SFTP fetch, Excel load |
 | account-upgrade-service | 8082 | Daily upgrade job |
 | communication-service | 8083 | Welcome letter HTML, sent as the email body |
-| audit-service | 8085 | Audit trail |
+| audit-service | 8085 | Audit trail of every business step and user action |
 | api-gateway | 8080 | Entry point, Okta login |
 
 ## Run locally
@@ -31,8 +31,8 @@ Run Maven with JDK 21 (BlockHound does not work on newer JDKs yet).
 ### In IntelliJ
 
 Open the project folder (it is a Maven project). Shared run configurations are in `.run/`:
-`file-ingestion-service (local)`, `account-upgrade-service (local)`, `communication-service (local)`, and
-`Upgrade flow (all services)`, which starts all three. They set `SPRING_PROFILES_ACTIVE=local` and short schedules
+`file-ingestion-service (local)`, `account-upgrade-service (local)`, `communication-service (local)`,
+`audit-service (local)`, and `Upgrade flow (all services)`, which starts all four. They set `SPRING_PROFILES_ACTIVE=local` and short schedules
 (load every minute, upgrade at :30 past each minute).
 The project SDK must be JDK 21, and annotation processing must be on (Lombok).
 
@@ -143,4 +143,24 @@ Templates are seeded by changeset `com-003-welcome-templates` (`SAVINGS_PLUS`, `
 
 ## Audit
 
-The audit trail (`AUDIT_EVENT`) is insert-only and kept forever, so it holds no customer names, emails or other personal data: event and correlation ids, actor, account number, and a short `SUMMARY`. The details stay in the service that owns them.
+`audit-service` reads every business topic (`account.file-loaded`, `account.upgraded`, `account.upgrade-rejected`, `account.upgrade-failed`, `notification.sent`, `notification.failed`, `audit.user-action`) and writes one row per event to `AUDIT_EVENT`: who (`ACTOR`), what (`EVENT_TYPE` and a short `SUMMARY`), when (`OCCURRED_AT`), which account, and which business action (`CORRELATION_ID`).
+
+The table is insert-only (a trigger blocks UPDATE and DELETE) and kept forever, so it holds no customer names or emails. Summaries are built from codes and counts, for example `Upgraded SAVINGS -> SAVINGS_PLUS for 2026-11-10`, and anything that looks like an email address is replaced with `[email removed]`. The event data is read as JSON, so a field a producer adds later does not break the audit trail. Each event is recorded once, even when delivered again.
+
+`GET /api/audit/events` searches it, newest first (ops admin, auditor, or scope `audit.read`). The filters are all optional and combine:
+
+| Parameter | Example | Gives |
+|---|---|---|
+| `accountNo` | `AC261110000042` | one account's history |
+| `correlationId` | from any event or log line | one business action across services, for example one file from load to emails |
+| `eventType`, `actor` | `UpgradeRejected`, `ops.person@bank.example` | one kind of event, or one person's actions |
+| `from`, `to` | `2026-11-10T00:00:00Z` | a time window (`to` is exclusive) |
+| `page`, `size` | `0`, `50` | paging; `size` is capped at 200 |
+
+Locally, the mock OAuth2 server hands out an `audit.read` token:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8090/default/token -d grant_type=client_credentials \
+  -d client_id=local-auditor -d client_secret=x -d scope=audit.read | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8085/api/audit/events?eventType=FileLoaded" | python3 -m json.tool
+```
