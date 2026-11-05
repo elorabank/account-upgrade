@@ -102,11 +102,15 @@ class AccessMatrixTest {
         new Endpoint(HttpMethod.GET, "/api/upgrades", ANY_ROLE_OR_READ),
         new Endpoint(HttpMethod.POST, "/api/notifications/7/resend", List.of("OPS_ADMIN", "SUPPORT", "svc notification.resend")),
         new Endpoint(HttpMethod.GET, "/api/audit/events", List.of("OPS_ADMIN", "AUDITOR", "svc audit.read")),
+        new Endpoint(HttpMethod.GET, "/api/notifications", List.of("OPS_ADMIN", "OPS_VIEWER", "SUPPORT")),
+        new Endpoint(HttpMethod.GET, "/api/notifications/summary", List.of("OPS_ADMIN", "OPS_VIEWER", "SUPPORT")),
+        new Endpoint(HttpMethod.GET, "/api/upgrades/summary", ANY_ROLE_OR_READ),
+        new Endpoint(HttpMethod.GET, "/api/files/3/errors", ANY_ROLE_OR_READ),
         new Endpoint(HttpMethod.GET, "/internal/files/12/accounts", List.of("svc staging.read")),
         // nothing grants these: wrong method, or no rule yet
         new Endpoint(HttpMethod.DELETE, "/api/files/1", List.of()),
+        new Endpoint(HttpMethod.POST, "/api/notifications/summary", List.of()),
         new Endpoint(HttpMethod.POST, "/api/audit/events", List.of()),
-        new Endpoint(HttpMethod.GET, "/api/notifications", List.of()),
         new Endpoint(HttpMethod.GET, "/api/something-new", List.of()),
         // internal paths: a person's role never opens them, and only the one rule exists
         new Endpoint(HttpMethod.DELETE, "/internal/files/12/accounts", List.of()),

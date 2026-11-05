@@ -30,6 +30,17 @@
               "audit.read"
             ]
           }
+        },
+        {
+          "requestParam": "grant_type",
+          "match": "authorization_code",
+          "claims": {
+            "aud": [
+              "api-gateway",
+              "api://account-upgrade"
+            ],
+            "azp": "api-gateway"
+          }
         }
       ]
     }

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.bank.upgrade</groupId>
+    <artifactId>account-upgrade-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>ops-ui</artifactId>
+  <description>The ops console (React + TypeScript), packaged as static files the api-gateway serves</description>
+
+  <build>
+    <plugins>
+      <plugin>
+        <!-- Downloads its own Node into ops-ui/node, so the build does not depend on what is installed here -->
+        <groupId>com.github.eirslett</groupId>
+        <artifactId>frontend-maven-plugin</artifactId>
+        <version>${frontend-maven-plugin.version}</version>
+        <configuration>
+          <nodeVersion>${node.version}</nodeVersion>
+        </configuration>
+        <executions>
+          <execution>
+            <id>install-node</id>
+            <goals><goal>install-node-and-npm</goal></goals>
+          </execution>
+          <execution>
+            <id>npm-ci</id>
+            <goals><goal>npm</goal></goals>
+            <configuration><arguments>ci --no-audit --no-fund</arguments></configuration>
+          </execution>
+          <execution>
+            <!-- type-checks with tsc, then bundles into target/classes/static (see vite.config.ts) -->
+            <id>npm-build</id>
+            <phase>compile</phase>
+            <goals><goal>npm</goal></goals>
+            <configuration><arguments>run build</arguments></configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -297,4 +297,26 @@ class CommunicationFlowTest {
         client.post().uri("/api/notifications/{id}/resend", 987_654_321L)
             .headers(h -> h.setBearerAuth(JWT.user("AU_OPS_ADMIN"))).exchange().expectStatus().isNotFound();
     }
+
+    @Test
+    void theConsoleCanListEmailsByStatusAndCountThem() {
+        deliver(upgrade("LS1", "Ivan Petrov", "SAVINGS_PLUS"));
+        deliver(upgrade("LS2", "Jaya Menon", "SAVINGS_PLUS"));
+        sender.sendDue();
+        deliver(upgrade("LS3", "Kiran Shah", "SAVINGS_PLUS"));   // still waiting
+        String support = JWT.user("AU_SUPPORT");
+
+        client.get().uri("/api/notifications?status=PENDING").headers(h -> h.setBearerAuth(support)).exchange()
+            .expectStatus().isOk().expectBody()
+            .jsonPath("$.total").isEqualTo(1)
+            .jsonPath("$.items[0].accountNo").isEqualTo("LS3")
+            .jsonPath("$.items[0].recipient").isEqualTo("ls3@example.com")
+            .jsonPath("$.items[0].htmlBody").doesNotExist();
+        client.get().uri("/api/notifications/summary").headers(h -> h.setBearerAuth(support)).exchange()
+            .expectStatus().isOk().expectBody()
+            .jsonPath("$.byStatus.SENT").isEqualTo(2)
+            .jsonPath("$.byStatus.PENDING").isEqualTo(1)
+            .jsonPath("$.total").isEqualTo(3);
+        client.get().uri("/api/notifications").headers(h -> h.setBearerAuth(JWT.user("AU_AUDITOR"))).exchange().expectStatus().isForbidden();
+    }
 }

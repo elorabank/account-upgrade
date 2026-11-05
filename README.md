@@ -10,7 +10,8 @@ Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 | account-upgrade-service | 8082 | Daily upgrade job |
 | communication-service | 8083 | Welcome letter HTML, sent as the email body |
 | audit-service | 8085 | Audit trail of every business step and user action |
-| api-gateway | 8080 | Entry point, Okta login |
+| api-gateway | 8080 | Entry point, Okta login, serves the ops console |
+| ops-ui | - | The ops console (React + TypeScript), built by Maven into the gateway |
 
 ## Run locally
 
@@ -32,7 +33,7 @@ Run Maven with JDK 21 (BlockHound does not work on newer JDKs yet).
 
 Open the project folder (it is a Maven project). Shared run configurations are in `.run/`:
 `file-ingestion-service (local)`, `account-upgrade-service (local)`, `communication-service (local)`,
-`audit-service (local)`, and `Upgrade flow (all services)`, which starts all four. They set `SPRING_PROFILES_ACTIVE=local` and short schedules
+`audit-service (local)`, `api-gateway (local)`, and `Upgrade flow (all services)`, which starts all five. They set `SPRING_PROFILES_ACTIVE=local` and short schedules
 (load every minute, upgrade at :30 past each minute).
 The project SDK must be JDK 21, and annotation processing must be on (Lombok).
 
@@ -164,3 +165,28 @@ TOKEN=$(curl -s -X POST http://localhost:8090/default/token -d grant_type=client
   -d client_id=local-auditor -d client_secret=x -d scope=audit.read | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
 curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8085/api/audit/events?eventType=FileLoaded" | python3 -m json.tool
 ```
+
+## Ops console
+
+http://localhost:8080 (through the gateway, after signing in). It calls the same API as everything else, with the signed-in person's token, so each person sees and can do only what their role allows.
+
+| Page | Shows | Actions |
+|---|---|---|
+| Today | latest file, the day's upgrade totals, last 24 hours of emails | Run now: load files, run the upgrade (ops admin) |
+| Files | every file, then one file's rejected rows as they were in the sheet | |
+| Upgrades | search by status, business date, account, file | Retry a FAILED upgrade (ops admin) |
+| Emails | search by status, account | Resend (ops admin, support) |
+| Audit | the audit trail by account, business action or event type | |
+
+Run now takes the same cluster lock as the schedule, so it answers 409 while that job is already running anywhere. Retry, resend and run now are recorded in the audit trail with the person's name.
+
+**Signing in locally.** With the `local` profile the gateway uses the mock OAuth2 server instead of Okta. On its login page type any user name and paste one of these into "claims":
+
+| Role | Claims |
+|---|---|
+| ops admin | `{"groups":["AU_OPS_ADMIN"],"email":"ops.admin@bank.example","uid":"local-1","name":"Olivia Ops"}` |
+| ops viewer | `{"groups":["AU_OPS_VIEWER"],"email":"viewer@bank.example","uid":"local-2","name":"Victor Viewer"}` |
+| support | `{"groups":["AU_SUPPORT"],"email":"support@bank.example","uid":"local-3","name":"Sam Support"}` |
+| auditor | `{"groups":["AU_AUDITOR"],"email":"auditor@bank.example","uid":"local-4","name":"Ada Auditor"}` |
+
+**Working on the UI.** `cd ops-ui && npm run watch` rebuilds into `ops-ui/target/classes/static` on every save; with the gateway running from IntelliJ, reload the page. `mvn verify` builds it with its own Node (`node.version` in the parent pom) and type-checks it first.

@@ -1,5 +1,6 @@
 package com.bank.upgrade.common.autoconfigure;
 
+import com.bank.upgrade.common.scheduling.ManualRunner;
 import javax.sql.DataSource;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
@@ -26,5 +27,12 @@ public class SchedulerLockAutoConfiguration {
                 .withJdbcTemplate(new JdbcTemplate(dataSource))
                 .usingDbTime()
                 .build());
+    }
+
+    /** "Run now" for the scheduled jobs, under the same locks. */
+    @Bean
+    @ConditionalOnMissingBean
+    ManualRunner manualRunner(LockProvider lockProvider) {
+        return new ManualRunner(lockProvider);
     }
 }
