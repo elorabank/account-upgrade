@@ -1,14 +1,18 @@
-# Shared by every app. Okta values come from the environment; the .invalid host makes a missing
+# Shared by every app. The identity provider comes from the environment; the .invalid host makes a missing
 # configuration fail loudly instead of calling a real server.
 spring:
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://${OKTA_DOMAIN:okta-not-configured.invalid}/oauth2/${OKTA_AUTH_SERVER_ID:default}
+          issuer-uri: ${bank.idp.issuer-uri}
           audiences: api://account-upgrade
 
 bank:
+  idp:
+    # The realm (Keycloak) or authorization server (Okta, Auth0) that issues every token. Clients derive their
+    # endpoints from it using Keycloak's paths; for another provider set those endpoint properties directly.
+    issuer-uri: ${IDP_ISSUER_URI:https://idp-not-configured.invalid/realms/account-upgrade}
   # The bank's time zone: the 01:00 and 03:00 schedules run in it. Containers usually run in UTC, so never rely on the server's zone.
   time-zone: ${BANK_TIME_ZONE:Asia/Kolkata}
 
@@ -23,13 +27,11 @@ logging:
     # the correlation id replaces Spring Boot's default [app,trace,span] block
     correlation: "[%X{correlationId:-}] "
 ---
-# Local development: tokens come from the mock OAuth2 server in docker-compose instead of Okta
+# Local development: tokens come from Keycloak in docker-compose
 spring:
   config:
     activate:
       on-profile: local
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: http://localhost:8090/default
+bank:
+  idp:
+    issuer-uri: http://localhost:8180/realms/account-upgrade

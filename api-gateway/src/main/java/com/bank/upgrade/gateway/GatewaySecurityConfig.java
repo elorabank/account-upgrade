@@ -2,6 +2,7 @@ package com.bank.upgrade.gateway;
 
 import static org.springframework.security.config.Customizer.withDefaults;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -18,7 +19,6 @@ import org.springframework.security.web.server.authentication.HttpStatusServerEn
 import org.springframework.security.web.server.authentication.RedirectServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.DelegatingServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.DelegatingServerAuthenticationEntryPoint.DelegateEntry;
-import org.springframework.security.web.server.authentication.logout.RedirectServerLogoutSuccessHandler;
 import org.springframework.security.web.server.csrf.CookieServerCsrfTokenRepository;
 import org.springframework.security.web.server.csrf.CsrfToken;
 import org.springframework.security.web.server.csrf.ServerCsrfTokenRequestAttributeHandler;
@@ -32,8 +32,9 @@ import reactor.core.publisher.Mono;
 /**
  * Two ways in, one rule: the caller must be authenticated. Roles are enforced by each service.
  * <ul>
- *   <li>A request with a bearer token (Postman, other systems) is validated as an Okta JWT and passed on unchanged.</li>
- *   <li>Everything else is a browser: sign in with Okta (authorization code + PKCE), keep the session here,
+ *   <li>A request with a bearer token (Postman, other systems) is validated as a JWT from the identity provider and
+ *       passed on unchanged.</li>
+ *   <li>Everything else is a browser: sign in at the identity provider (authorization code + PKCE), keep the session here,
  *       and relay the user's access token downstream (TokenRelay in the route filters).</li>
  * </ul>
  * The ops console is a single-page app served from here. It reads the CSRF token from the {@code XSRF-TOKEN} cookie
@@ -59,13 +60,14 @@ class GatewaySecurityConfig {
 
     @Bean
     @Order(2)
-    SecurityWebFilterChain browserChain(ServerHttpSecurity http, ServerOAuth2AuthorizationRequestResolver pkceResolver) {
+    SecurityWebFilterChain browserChain(ServerHttpSecurity http, ServerOAuth2AuthorizationRequestResolver pkceResolver,
+            @Value("${bank.gateway.idp-logout-uri:}") String idpLogoutUri) {
         // XHR calls (/api, /me) get a 401 they can handle; page navigations are sent to the login
         var entryPoint = new DelegatingServerAuthenticationEntryPoint(new DelegateEntry(
             new OrServerWebExchangeMatcher(
                 new PathPatternParserServerWebExchangeMatcher("/api/**"), new PathPatternParserServerWebExchangeMatcher("/me")),
             new HttpStatusServerEntryPoint(HttpStatus.UNAUTHORIZED)));
-        entryPoint.setDefaultEntryPoint(new RedirectServerAuthenticationEntryPoint("/oauth2/authorization/okta"));
+        entryPoint.setDefaultEntryPoint(new RedirectServerAuthenticationEntryPoint("/oauth2/authorization/login"));
         return http
             // The single-page app sends the cookie's raw value back, so the token is not masked per request
             .csrf(c -> c.csrfTokenRepository(CookieServerCsrfTokenRepository.withHttpOnlyFalse())
@@ -73,8 +75,8 @@ class GatewaySecurityConfig {
             .authorizeExchange(a -> a.pathMatchers(OPEN).permitAll().anyExchange().authenticated())
             .oauth2Login(o -> o.authorizationRequestResolver(pkceResolver))
             .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint))
-            // POST /logout ends the session here and returns to the start page, which asks for a login again
-            .logout(l -> l.logoutSuccessHandler(new RedirectServerLogoutSuccessHandler()))
+            // POST /logout ends the session here and at the identity provider, then returns to the start page
+            .logout(l -> l.logoutSuccessHandler(new IdpLogoutSuccessHandler(idpLogoutUri)))
             .build();
     }
 
@@ -88,7 +90,7 @@ class GatewaySecurityConfig {
             .then(chain.filter(exchange));
     }
 
-    /** Okta's web app is a confidential client, but PKCE is requested anyway as the design requires. */
+    /** The gateway is a confidential client, but PKCE is requested anyway as the design requires. */
     @Bean
     ServerOAuth2AuthorizationRequestResolver pkceResolver(ReactiveClientRegistrationRepository registrations) {
         var resolver = new DefaultServerOAuth2AuthorizationRequestResolver(registrations);

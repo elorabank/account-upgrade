@@ -36,6 +36,28 @@ class ActorResolverTest {
     }
 
     @Test
+    void keycloakUserIsNamedByEmailOrUserName() {
+        assertThat(ActorResolver.of(token(b -> b.claim("email", "olivia@bank.test").claim("preferred_username", "olivia.ops")
+            .claim("azp", "api-gateway")))).isEqualTo("olivia@bank.test");
+        assertThat(ActorResolver.of(token(b -> b.claim("preferred_username", "olivia.ops")))).isEqualTo("olivia.ops");
+    }
+
+    @Test
+    void keycloakServiceAccountIsASystemActor() {
+        assertThat(ActorResolver.of(token(b -> b.claim("client_id", "account-upgrade-service")
+            .claim("preferred_username", "service-account-account-upgrade-service")))).isEqualTo("system:account-upgrade-service");
+        // older Keycloak versions: only the service-account user name
+        assertThat(ActorResolver.of(token(b -> b.claim("preferred_username", "service-account-reporting"))))
+            .isEqualTo("system:reporting");
+    }
+
+    @Test
+    void oktaUserTokenAlsoCarriesTheClientButIsStillThePerson() {
+        assertThat(ActorResolver.of(token(b -> b.claim("uid", "00u1").claim("cid", "gateway").claim("email", "pat@bank.test"))))
+            .isEqualTo("pat@bank.test");
+    }
+
+    @Test
     void schedulerAndMissingCallerAreSystemActors() {
         assertThat(ActorResolver.scheduler("upgrade-scheduler")).isEqualTo("system:upgrade-scheduler");
         assertThat(ActorResolver.of(null)).isEqualTo("system:unknown");

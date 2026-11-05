@@ -15,7 +15,7 @@ import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 
 /**
- * Service-to-service calls with an Okta client-credentials token. Turn on with
+ * Service-to-service calls with a client-credentials token from the identity provider. Turn on with
  * {@code bank.security.client.registration-id=<name of the spring.security.oauth2.client registration>}, then add
  * the {@code serviceTokenFilter} bean to a WebClient: {@code builder.filter(serviceTokenFilter).build()}.
  * Tokens are cached until they expire, and no signed-in user is needed, so schedulers can use it.

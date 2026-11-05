@@ -80,7 +80,7 @@ class IngestionStagingClientTest {
     static void endpoints(DynamicPropertyRegistry r) {
         String base = "http://127.0.0.1:" + SERVER.getAddress().getPort();
         r.add("bank.upgrade.ingestion-url", () -> base);
-        r.add("spring.security.oauth2.client.provider.okta.token-uri", () -> base + "/token");
+        r.add("spring.security.oauth2.client.provider.idp.token-uri", () -> base + "/token");
     }
 
     @AfterAll

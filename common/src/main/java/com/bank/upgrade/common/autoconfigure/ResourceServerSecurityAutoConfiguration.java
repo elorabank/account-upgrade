@@ -1,7 +1,7 @@
 package com.bank.upgrade.common.autoconfigure;
 
 import com.bank.upgrade.common.security.ApiAccessRules;
-import com.bank.upgrade.common.security.OktaJwtAuthenticationConverter;
+import com.bank.upgrade.common.security.BankJwtAuthenticationConverter;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -16,7 +16,7 @@ import org.springframework.security.web.server.context.NoOpServerSecurityContext
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
 
 /**
- * Stateless Okta JWT protection for a service. On by default wherever the security libraries are
+ * Stateless JWT protection for a service (tokens from the identity provider set in {@code bank.idp.issuer-uri}). On by default wherever the security libraries are
  * present, so a new service is secure from the start; set {@code bank.security.resource-server.enabled=false}
  * to turn it off. It backs off if the app defines its own chain (the gateway does).
  * Runs before Spring Boot's own default chains so only one chain exists.
@@ -41,7 +41,7 @@ public class ResourceServerSecurityAutoConfiguration {
             .securityContextRepository(NoOpServerSecurityContextRepository.getInstance())
             .requestCache(c -> c.requestCache(NoOpServerRequestCache.getInstance()))
             .authorizeExchange(ApiAccessRules::apply)
-            .oauth2ResourceServer(o -> o.jwt(j -> j.jwtAuthenticationConverter(OktaJwtAuthenticationConverter.reactive())))
+            .oauth2ResourceServer(o -> o.jwt(j -> j.jwtAuthenticationConverter(BankJwtAuthenticationConverter.reactive())))
             .build();
     }
 }
