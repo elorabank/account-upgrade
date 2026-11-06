@@ -22,7 +22,11 @@ import org.springframework.batch.item.ItemProcessor;
 public class RowProcessor implements ItemProcessor<RawRow, ParsedRow> {
 
     private static final Pattern ACCOUNT_NO_FORMAT = Pattern.compile("[A-Za-z0-9-]{1,34}");
-    private static final Pattern EMAIL_FORMAT = Pattern.compile("[^@\\s]+@[^@\\s]+\\.[^@\\s]+");
+    /**
+     * Something before the @, then domain labels separated by single dots. The labels cannot contain dots, so the
+     * pattern has only one way to match and checking it takes time linear in the length (no backtracking).
+     */
+    private static final Pattern EMAIL_FORMAT = Pattern.compile("[^@\\s]+@[^@\\s.]+(?:\\.[^@\\s.]+)+");
 
     private final long fileId;
     private final Set<String> seenAccounts;
