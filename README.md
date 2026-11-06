@@ -280,8 +280,14 @@ Things a production system would need that this project leaves out on purpose:
 ## Monitoring
 
 Every service publishes its metrics at `/actuator/prometheus`. The local Prometheus (http://localhost:9090) scrapes
-the services running on this machine every 5 seconds, and Grafana (http://localhost:3000, no sign-in needed to look;
-`admin` / `admin` to edit) opens on the **Account upgrade** dashboard.
+the services running on this machine every 5 seconds, and Grafana (http://localhost:3000) opens on the **Account
+upgrade** dashboard.
+
+**Signing in to Grafana.** *Sign in with Keycloak*, with the same people as the ops console (password `local-pw`):
+`olivia.ops` (`AU_OPS_ADMIN`) becomes a Grafana Admin; `victor.view`, `sam.support` and `ada.audit` may look but not
+change anything; anyone in none of these groups is refused. Signing out of Grafana also signs out of Keycloak. The
+local `admin` / `admin` login stays for emergencies. Like the `prometheus` client below, the `grafana` client only
+exists in a Keycloak recreated after it was added (`docker compose up -d --force-recreate keycloak keycloak-setup`).
 
 **Who may read metrics.** `/actuator/prometheus` needs a token with scope `metrics.read`, which only Keycloak's
 `prometheus` client gets; a person's token, even an ops admin's, is refused. Prometheus fetches and renews that token

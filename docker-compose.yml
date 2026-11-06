@@ -155,11 +155,32 @@ services:
   grafana:
     image: grafana/grafana:13.2.5
     environment:
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      # Local break-glass login; people sign in with Keycloak ("Sign in with Keycloak")
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
-      # Local only: anyone on this machine may look without signing in
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_GENERIC_OAUTH_ENABLED: "true"
+      GF_AUTH_GENERIC_OAUTH_NAME: Keycloak
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: grafana
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: local-secret
+      GF_AUTH_GENERIC_OAUTH_SCOPES: openid email profile
+      GF_AUTH_GENERIC_OAUTH_USE_PKCE: "true"
+      # The browser goes to Keycloak on localhost:8180; Grafana itself talks to it inside compose
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: http://localhost:8180/realms/account-upgrade/protocol/openid-connect/auth
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: http://keycloak:8080/realms/account-upgrade/protocol/openid-connect/token
+      GF_AUTH_GENERIC_OAUTH_API_URL: http://keycloak:8080/realms/account-upgrade/protocol/openid-connect/userinfo
+      GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH: preferred_username
+      GF_AUTH_GENERIC_OAUTH_EMAIL_ATTRIBUTE_PATH: email
+      GF_AUTH_GENERIC_OAUTH_NAME_ATTRIBUTE_PATH: name
+      # Ops admins may change things, the other ops groups only look; anyone else is refused (strict)
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: >-
+        contains(groups[*], 'AU_OPS_ADMIN') && 'Admin'
+        || (contains(groups[*], 'AU_OPS_VIEWER') || contains(groups[*], 'AU_SUPPORT') || contains(groups[*], 'AU_AUDITOR')) && 'Viewer'
+        || ''
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_STRICT: "true"
+      GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP: "true"
+      # Signing out of Grafana also signs out of Keycloak
+      GF_AUTH_SIGNOUT_REDIRECT_URL: http://localhost:8180/realms/account-upgrade/protocol/openid-connect/logout?client_id=grafana&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Flogin
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/account-upgrade.json
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"

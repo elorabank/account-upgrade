@@ -58,6 +58,12 @@ $KC create clients $R -s clientId=api-gateway -s name="API gateway / ops console
   -s 'redirectUris=["http://localhost:8080/login/oauth2/code/login"]' -s 'webOrigins=["http://localhost:8080"]' \
   -s 'attributes."pkce.code.challenge.method"=S256' -s 'attributes."post.logout.redirect.uris"=http://localhost:8080/'
 
+# Grafana (monitoring) signs people in too; their groups decide what they may do there (docker-compose: grafana)
+$KC create clients $R -s clientId=grafana -s name="Grafana (monitoring)" -s secret=local-secret \
+  -s publicClient=false -s standardFlowEnabled=true -s directAccessGrantsEnabled=false -s serviceAccountsEnabled=false \
+  -s 'redirectUris=["http://localhost:3000/login/generic_oauth"]' -s 'webOrigins=["http://localhost:3000"]' \
+  -s 'attributes."pkce.code.challenge.method"=S256' -s 'attributes."post.logout.redirect.uris"=http://localhost:3000/login'
+
 service_client() {  # client id, allowed scopes...
   local id client=$1; shift
   id=$($KC create clients $R -i -s clientId="$client" -s secret=local-secret -s publicClient=false \
