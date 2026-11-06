@@ -15,6 +15,10 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Spring Cloud numbers releases by year, so 2025.0 -> 2025.1 looks minor, but 2025.1 is the release for
+      # Spring Boot 4. It belongs to that migration; remove this rule when moving to Boot 4.
+      - dependency-name: "org.springframework.cloud:spring-cloud-dependencies"
+        versions: [">= 2025.1"]
     groups:
       maven:
         patterns: ["*"]
