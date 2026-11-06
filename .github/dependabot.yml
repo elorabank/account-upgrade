@@ -1,26 +1,38 @@
 # Dependabot opens pull requests for newer versions; CI checks each one. Grouped, so one week's updates of a kind come
 # as one pull request instead of many. Security updates (for known vulnerabilities) also need "Dependabot alerts"
 # switched on in the repository's Settings > Advanced Security.
+#
+# Only minor and patch versions are proposed for libraries and images. A major version (Spring Boot 4, Vite 8, Kafka 4,
+# ...) changes APIs and is a migration of its own: do it on purpose, on its own branch, not as a weekly bot update.
+# GitHub actions are the exception: their major versions are usually just a newer Node.js runtime, and CI itself runs
+# them, so a green run is real evidence.
 version: 2
 updates:
   - package-ecosystem: maven
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       maven:
         patterns: ["*"]
-        update-types: [minor, patch]
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
     directory: /ops-ui
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
+      # React and its type definitions must stay on the same version: always in one pull request
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
       npm:
         patterns: ["*"]
-        update-types: [minor, patch]
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
@@ -31,10 +43,14 @@ updates:
       actions:
         patterns: ["*"]
 
+  # CI does not start docker-compose, so a green run says nothing about a new image: try it locally before merging
   - package-ecosystem: docker-compose
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       images:
         patterns: ["*"]

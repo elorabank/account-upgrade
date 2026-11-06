@@ -20,7 +20,12 @@ public class SshjFileSource implements FileSource {
         this.config = config;
     }
 
+    /**
+     * The SFTP client is not closed here on purpose: it belongs to the returned session, which closes it and the SSH
+     * connection in {@link Session#close()}, and callers hold the session in try-with-resources.
+     */
     @Override
+    @SuppressWarnings("java:S2095")   // Sonar cannot see that the session takes over the SFTP client
     public Session open() throws IOException {
         var ssh = new SSHClient();
         try {

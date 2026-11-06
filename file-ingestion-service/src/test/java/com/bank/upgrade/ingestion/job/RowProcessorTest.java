@@ -6,6 +6,7 @@ import com.bank.upgrade.ingestion.excel.RawRow;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -40,6 +41,24 @@ class RowProcessorTest {
         assertThat(s.getKycStatus()).isEqualTo("VERIFIED");
         assertThat(s.getBalance()).isEqualByComparingTo("1250.50");
         assertThat(s.getRawRowJson()).contains("ACC-001");
+    }
+
+    @Test
+    void emailAddressesMustHaveTheShapeOfOne() {
+        int row = 2;
+        for (String ok : List.of("asha@example.com", "a.b+tag@mail.example.co.in", "x@y.z")) {
+            var v = good();
+            v.put("accountno", "ACC-" + row++);   // each row its own account: a repeat is rejected as a duplicate
+            v.put("email", ok);
+            assertThat(run(2, v)).as(ok).isInstanceOf(ParsedRow.Valid.class);
+        }
+        for (String bad : List.of("not-an-email", "a@b", "a@b..c", "a@.b.c", "a@b.c.", "a b@c.d", "a@@b.c")) {
+            var v = good();
+            v.put("accountno", "ACC-" + row++);
+            v.put("email", bad);
+            assertThat(run(2, v)).as(bad).isInstanceOfSatisfying(ParsedRow.Rejected.class,
+                r -> assertThat(r.error().getErrorMessage()).contains("email"));
+        }
     }
 
     @Test

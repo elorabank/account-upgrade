@@ -282,7 +282,10 @@ install org.owasp:dependency-check-maven:aggregate`, report in `target/dependenc
 downloads the database, which takes a while).
 
 Dependabot (`.github/dependabot.yml`) opens weekly pull requests with newer versions of the Maven dependencies, the
-ops console's npm packages and the GitHub actions, and monthly for the docker-compose images; CI checks each one.
+ops console's npm packages and the GitHub actions, and monthly for the docker-compose images; CI checks each one. It
+proposes minor and patch versions only (any version for the GitHub actions): a major version such as Spring Boot 4 is a
+migration to do on purpose, not a weekly update. React and its type packages always come together. CI does not start
+docker-compose, so try an image update locally before merging it.
 For pull requests that fix known vulnerabilities, also switch on *Dependabot alerts* and *security updates* in the
 repository's Settings > Advanced Security.
 
