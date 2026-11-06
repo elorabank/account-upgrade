@@ -8,14 +8,25 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * What one service deletes when it is old enough, for example "processed-event records older than 30 days".
- * {@link RetentionRunner} calls {@link Purge#deleteBatch} again and again, each call in its own short transaction,
- * until a call deletes fewer rows than asked: many small deletes instead of one huge one.
+ * {@link RetentionRunner} first drops the partitions that are wholly past the cutoff, if the rule has any
+ * ({@link #withPartitions}), then calls {@link Purge#deleteBatch} again and again, each call in its own short
+ * transaction, until a call deletes fewer rows than asked: many small deletes instead of one huge one.
  *
  * @param name        short name, used in logs, metrics and the {@code bank.retention.keep.<name>} setting
  * @param defaultKeep how long rows are kept unless {@code bank.retention.keep.<name>} says otherwise
  * @param purge       deletes at most {@code limit} rows older than {@code cutoff}, returns how many it deleted
+ * @param partitions  drops whole partitions before the row deletes; null for a table without partitions
  */
-public record RetentionRule(String name, Duration defaultKeep, Purge purge) {
+public record RetentionRule(String name, Duration defaultKeep, Purge purge, PartitionDrop partitions) {
+
+    public RetentionRule(String name, Duration defaultKeep, Purge purge) {
+        this(name, defaultKeep, purge, null);
+    }
+
+    /** The same rule, dropping whole partitions first; its row deletes take what is left (or everything, without partitions). */
+    public RetentionRule withPartitions(PartitionDrop partitions) {
+        return new RetentionRule(name, defaultKeep, purge, partitions);
+    }
 
     @FunctionalInterface
     public interface Purge {

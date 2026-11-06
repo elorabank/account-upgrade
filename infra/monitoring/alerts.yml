@@ -76,3 +76,14 @@ groups:
         annotations:
           summary: "Welcome emails failed for good in the last 15 minutes"
           description: "Rejected addresses or a long mail outage. The console's Emails page lists them; support can resend."
+
+  - name: housekeeping
+    rules:
+      - alert: AuditArchiveProblem
+        # The archive job runs once a day; a month it could not archive, or whose rows changed, needs a person
+        expr: increase(audit_archive_months_total{outcome=~"changed|failed"}[1d]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "The audit archive could not move a month to its file ({{ $labels.outcome }})"
+          description: "The month's rows are still in AUDIT_EVENT. See the audit service's log and GET /api/audit/archives."

@@ -8,6 +8,7 @@ import com.bank.upgrade.common.messaging.OutboxService;
 import com.bank.upgrade.communication.config.CommunicationProperties;
 import com.bank.upgrade.communication.domain.WelcomeLetter;
 import com.bank.upgrade.communication.domain.WelcomeLetterRepository;
+import com.bank.upgrade.communication.letter.LetterContent;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -45,6 +46,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * rejects fails at once. If the service stops after the server accepted an email but before the transaction
  * commits, that email is sent again later: delivery is at least once, never lost.
  * <p>
+ * Each email is built here, from the letter's template version and values ({@link LetterContent}). A letter that
+ * cannot be built fails at once, like a message the server refuses: trying again would build the same thing.
+ * <p>
  * Metrics: {@code mail.letters} by result (sent, failed, retry), counted once the round has committed, and
  * {@code mail.round}, the time of each round that had letters to send.
  */
@@ -53,6 +57,7 @@ public class LetterSender {
     private static final Logger log = LoggerFactory.getLogger(LetterSender.class);
 
     private final WelcomeLetterRepository letters;
+    private final LetterContent content;
     private final JavaMailSender mail;
     private final OutboxService outbox;
     private final CommunicationProperties properties;
@@ -61,10 +66,11 @@ public class LetterSender {
     private final MeterRegistry meters;
     private final Timer round;
 
-    public LetterSender(WelcomeLetterRepository letters, JavaMailSender mail, OutboxService outbox,
+    public LetterSender(WelcomeLetterRepository letters, LetterContent content, JavaMailSender mail, OutboxService outbox,
             CommunicationProperties properties, PlatformTransactionManager transactionManager, Clock clock,
             MeterRegistry meters) {
         this.letters = letters;
+        this.content = content;
         this.mail = mail;
         this.outbox = outbox;
         this.properties = properties;
@@ -112,7 +118,7 @@ public class LetterSender {
         for (WelcomeLetter letter : batch) {
             try {
                 messages.put(message(letter), letter);
-            } catch (MessagingException | UnsupportedEncodingException e) {
+            } catch (MessagingException | UnsupportedEncodingException | RuntimeException e) {
                 problems.put(letter, new MailPreparationException("The message cannot be built: " + e.getMessage(), e));
             }
         }
@@ -145,7 +151,7 @@ public class LetterSender {
         helper.setFrom(properties.from(), properties.fromName());
         helper.setTo(letter.getRecipient());
         helper.setSubject(letter.getSubject());
-        helper.setText(letter.getHtmlBody(), true);
+        helper.setText(content.html(letter), true);
         message.setHeader("X-Letter-Id", String.valueOf(letter.getId()));
         return message;
     }
@@ -164,6 +170,9 @@ public class LetterSender {
         if (problem == null) {
             sent(letter);
             return "sent";
+        } else if (problem instanceof MailPreparationException) {
+            failed(letter, problem.getMessage());
+            return "failed";
         } else if (permanent(problem)) {
             failed(letter, "The mail server refused the message: " + problem.getMessage());
             return "failed";

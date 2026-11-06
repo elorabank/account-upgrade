@@ -5,3 +5,4 @@ target/
 .DS_Store
 *.log
 infra/kafka-secure/certs/
+audit-archive/

@@ -11,3 +11,5 @@ databaseChangeLog:
       file: db/changelog/003-staging-api-and-batch-restart.sql
   - include:
       file: db/changelog/005-drop-processed-event.sql
+  - include:
+      file: db/changelog/006-partition-by-file.sql

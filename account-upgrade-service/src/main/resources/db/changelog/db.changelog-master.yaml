@@ -15,3 +15,5 @@ databaseChangeLog:
       file: db/changelog/004-upgrade-leases.sql
   - include:
       file: db/changelog/005-drop-shedlock.sql
+  - include:
+      file: db/changelog/006-partition-by-month.sql

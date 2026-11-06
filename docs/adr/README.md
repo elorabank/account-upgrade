@@ -19,8 +19,11 @@ new record that supersedes the old one. See [ADR-0001](0001-record-architecture-
 | [0012](0012-shared-core-call-limit-in-redis.md) | One core-call rate limit for all copies, counted in Redis | Accepted |
 | [0013](0013-keycloak-and-provider-neutral-security.md) | Keycloak locally, security that works with any OIDC provider | Accepted |
 | [0014](0014-gateway-login-sessions-in-redis.md) | Sign-in at the gateway, sessions in Redis, tokens relayed | Accepted |
-| [0015](0015-insert-only-audit-trail-without-personal-data.md) | An insert-only audit trail without personal data | Accepted |
+| [0015](0015-insert-only-audit-trail-without-personal-data.md) | An insert-only audit trail without personal data | Accepted; old months archived by ADR-0022 |
 | [0016](0016-monitoring-prometheus-grafana-alertmanager.md) | Monitoring with Prometheus, Grafana and Alertmanager; metrics need a scope | Accepted |
 | [0017](0017-tests-without-containers-or-databases.md) | Tests without containers or databases | Accepted |
 | [0018](0018-dependency-updates-minor-and-patch-only.md) | Dependency updates: minor and patch only, majors on purpose | Accepted; Dependabot paused since 2026-11-06 |
-| [0019](0019-daily-retention-with-batched-deletes.md) | Daily retention with batched deletes | Accepted |
+| [0019](0019-daily-retention-with-batched-deletes.md) | Daily retention with batched deletes | Accepted; partition drops added by ADR-0021 |
+| [0020](0020-letters-keep-values-not-html.md) | Letters keep their template version and values, not the HTML | Accepted |
+| [0021](0021-partition-the-big-tables.md) | Partition the big tables; the clean-up drops whole partitions | Accepted |
+| [0022](0022-audit-archive-files.md) | Old audit months move to checked archive files | Accepted |

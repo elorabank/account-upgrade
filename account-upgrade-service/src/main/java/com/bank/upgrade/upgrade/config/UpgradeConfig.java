@@ -1,5 +1,6 @@
 package com.bank.upgrade.upgrade.config;
 
+import com.bank.upgrade.common.retention.PartitionDrop;
 import com.bank.upgrade.common.retention.RetentionRule;
 import com.bank.upgrade.common.events.FileLoaded;
 import com.bank.upgrade.common.events.Topics;
@@ -116,13 +117,16 @@ public class UpgradeConfig {
 
     /**
      * Finished requests (upgraded, rejected, failed) of business days older than 400 days. Requests still PENDING or
-     * IN_PROGRESS are never deleted; the audit trail keeps the history of every upgrade.
+     * IN_PROGRESS are never deleted; the audit trail keeps the history of every upgrade. The table is partitioned by
+     * month of business date: a month with nothing left to do is dropped whole.
      */
     @Bean
     RetentionRule upgradeRequestsRetention(JdbcTemplate jdbc, @Value("${bank.time-zone}") String zone) {
         return RetentionRule.olderThanDate("upgrade-requests", java.time.Duration.ofDays(400), jdbc, """
             DELETE FROM UPGRADE_REQUEST
             WHERE STATUS IN ('UPGRADED', 'REJECTED', 'FAILED') AND BUSINESS_DATE < ? AND ROWNUM <= ?""",
-            java.time.ZoneId.of(zone));
+            java.time.ZoneId.of(zone))
+            .withPartitions(PartitionDrop.byMonth(jdbc, "UPGRADE_REQUEST", java.time.ZoneId.of(zone),
+                "STATUS NOT IN ('UPGRADED', 'REJECTED', 'FAILED')"));
     }
 }

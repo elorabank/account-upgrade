@@ -15,8 +15,12 @@ import static org.mockito.Mockito.when;
 import com.bank.upgrade.common.events.Topics;
 import com.bank.upgrade.common.messaging.OutboxService;
 import com.bank.upgrade.communication.config.CommunicationProperties;
+import com.bank.upgrade.communication.domain.LetterTemplate;
+import com.bank.upgrade.communication.domain.LetterTemplateRepository;
 import com.bank.upgrade.communication.domain.WelcomeLetter;
 import com.bank.upgrade.communication.domain.WelcomeLetterRepository;
+import com.bank.upgrade.communication.letter.LetterContent;
+import com.bank.upgrade.communication.letter.LetterRenderer;
 import com.bank.upgrade.test.NoOpTransactionManager;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.mail.Address;
@@ -27,11 +31,13 @@ import jakarta.mail.internet.MimeMessage;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
@@ -47,6 +53,7 @@ class LetterSenderTest {
     static final Instant NOW = Instant.parse("2026-11-10T22:00:00Z");
 
     final WelcomeLetterRepository letters = mock(WelcomeLetterRepository.class);
+    final LetterTemplateRepository templates = mock(LetterTemplateRepository.class);
     final JavaMailSender mail = mock(JavaMailSender.class);
     final OutboxService outbox = mock(OutboxService.class);
     final SimpleMeterRegistry meters = new SimpleMeterRegistry();
@@ -54,7 +61,7 @@ class LetterSenderTest {
     final List<WelcomeLetter> due = new ArrayList<>();
     final AtomicLong ids = new AtomicLong();
 
-    final LetterSender sender = new LetterSender(letters, mail, outbox,
+    final LetterSender sender = new LetterSender(letters, new LetterContent(templates, new LetterRenderer()), mail, outbox,
         new CommunicationProperties("no-reply@bank.example", "Example Bank", 3, Duration.ofMinutes(1), 100, 2),
         new NoOpTransactionManager(), Clock.fixed(NOW, ZoneOffset.UTC), meters);
 
@@ -66,6 +73,12 @@ class LetterSenderTest {
             return null;
         }).when(mail).send(any(MimeMessage[].class));
         when(letters.lockDue(any(), anyInt())).thenAnswer(inv -> List.copyOf(due));
+        var template = new LetterTemplate();
+        template.setId(1L);
+        template.setSubject("Welcome");
+        template.setBodyHtml("<p>Dear <span th:text=\"${customerName}\">x</span>, account "
+            + "<b th:text=\"${maskedAccountNo}\">x</b> is now <span th:text=\"${toTypeLabel}\">x</span></p>");
+        when(templates.findById(1L)).thenReturn(Optional.of(template));
     }
 
     private WelcomeLetter letter(String account, int attemptsSoFar) {
@@ -75,10 +88,22 @@ class LetterSenderTest {
         l.setAccountNo(account);
         l.setRecipient(account.toLowerCase() + "@example.com");
         l.setSubject("Welcome");
-        l.setHtmlBody("<p>Hello</p>");
+        l.setTemplateId(1L);
+        l.setCustomerName("Asha <Rao>");
+        l.setFromType("SAVINGS");
+        l.setToType("SAVINGS_PLUS");
+        l.setBusinessDate(LocalDate.of(2026, 11, 10));
         l.setAttempts(attemptsSoFar);
         due.add(l);
         return l;
+    }
+
+    private static String body(MimeMessage message) {
+        try {
+            return (String) message.getContent();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private double counted(String result) {
@@ -103,6 +128,48 @@ class LetterSenderTest {
         });
         verify(outbox).publish(eq(Topics.NOTIFICATION_SENT), eq("A1"), anyString(), anyString(), any(), any());
         assertThat(counted("sent")).isEqualTo(2);
+    }
+
+    @Test
+    void theEmailIsBuiltWhenSentFromTheTemplateVersionAndTheStoredValues() throws Exception {
+        letter("AC261110000123", 0);
+        letter("AC261110000456", 0);
+
+        sender.sendDue();
+
+        assertThat(sent).extracting(LetterSenderTest::body).containsExactlyInAnyOrder(
+            "<p>Dear <span>Asha &lt;Rao&gt;</span>, account <b>ending 0123</b> is now <span>Savings Plus</span></p>",
+            "<p>Dear <span>Asha &lt;Rao&gt;</span>, account <b>ending 0456</b> is now <span>Savings Plus</span></p>");
+        // Template versions never change, so the template is read once, not once per letter
+        verify(templates).findById(1L);
+    }
+
+    @Test
+    void aLetterWrittenBeforeLettersBecameCompactIsSentFromItsOwnHtml() throws Exception {
+        var old = letter("OLD1", 0);
+        old.setTemplateId(99L);
+        old.setCustomerName(null);
+        old.setHtmlBody("<p>Written in full, long ago</p>");
+
+        sender.sendDue();
+
+        assertThat(sent).singleElement().extracting(LetterSenderTest::body).isEqualTo("<p>Written in full, long ago</p>");
+        assertThat(old.getStatus()).isEqualTo(WelcomeLetter.SENT);
+        verify(templates, never()).findById(99L);
+    }
+
+    @Test
+    void aLetterThatCannotBeBuiltFailsAtOnceAndTheOthersStillGo() {
+        var broken = letter("BROKEN", 0);
+        broken.setTemplateId(42L);
+        var good = letter("GOOD", 0);
+
+        sender.sendDue();
+
+        assertThat(broken.getStatus()).isEqualTo(WelcomeLetter.FAILED);
+        assertThat(broken.getErrorMessage()).contains("cannot be built").contains("template 42");
+        assertThat(good.getStatus()).isEqualTo(WelcomeLetter.SENT);
+        assertThat(sent).hasSize(1);
     }
 
     @Test

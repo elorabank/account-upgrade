@@ -7,3 +7,7 @@ databaseChangeLog:
       file: db/changelog/001-audit-tables.sql
   - include:
       file: db/changelog/003-audit-no-personal-data.sql
+  - include:
+      file: db/changelog/004-partition-by-month.sql
+  - include:
+      file: db/changelog/005-audit-archive.sql
