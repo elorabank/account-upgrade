@@ -4,6 +4,7 @@ Writes a test account file for the ingestion service: samples/accounts_<yyyyMMdd
 
     python3 samples/make_sample_accounts.py                # 10,000 rows for 2026-11-10
     python3 samples/make_sample_accounts.py 20261111 2500  # another day, another size
+    python3 samples/make_sample_accounts.py 20300101 1000000 /tmp/perf   # into another folder (performance tests)
 
 Uses only the Python standard library. The rows are the same for the same date and size, and different for a
 different date, so each date gives a file the ingestion service has not seen before (it skips content it already loaded).
@@ -70,11 +71,7 @@ def cell(col, row_no, value):
 
 
 def write_xlsx(path, rows):
-    sheet = ['<?xml version="1.0" encoding="UTF-8"?>'
-             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>']
-    for r, row in enumerate([HEADER] + rows, start=1):
-        sheet.append(f'<row r="{r}">' + "".join(cell(c, r, v) for c, v in enumerate(row)) + "</row>")
-    sheet.append("</sheetData></worksheet>")
+    """Writes the sheet row by row into the zip, so a million rows does not need the whole file in memory."""
     ct = "application/vnd.openxmlformats-officedocument.spreadsheetml"
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml",
@@ -93,7 +90,12 @@ def write_xlsx(path, rows):
         z.writestr("xl/_rels/workbook.xml.rels",
                    '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
                    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
-        z.writestr("xl/worksheets/sheet1.xml", "".join(sheet))
+        with z.open("xl/worksheets/sheet1.xml", "w", force_zip64=True) as sheet:
+            sheet.write(b'<?xml version="1.0" encoding="UTF-8"?>'
+                        b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>')
+            for r, row in enumerate([HEADER] + rows, start=1):
+                sheet.write((f'<row r="{r}">' + "".join(cell(c, r, v) for c, v in enumerate(row)) + "</row>").encode())
+            sheet.write(b"</sheetData></worksheet>")
 
 
 def main():
@@ -101,8 +103,12 @@ def main():
     count = int(sys.argv[2]) if len(sys.argv) > 2 else 10_000
     if len(date) != 8 or not date.isdigit():
         sys.exit("date must be yyyyMMdd, for example 20261110")
+    if count > 1_048_575:
+        sys.exit("an Excel sheet holds at most 1,048,576 rows including the header")
     rows, e = make_rows(date, count)
-    path = Path(__file__).resolve().parent / f"accounts_{date}.xlsx"
+    folder = Path(sys.argv[3]) if len(sys.argv) > 3 else Path(__file__).resolve().parent
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"accounts_{date}.xlsx"
     write_xlsx(path, rows)
     bad = e["bad_email"] + e["no_name"] + e["duplicate"]
     loaded = count - bad

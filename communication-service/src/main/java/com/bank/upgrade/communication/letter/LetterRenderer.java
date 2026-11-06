@@ -52,7 +52,8 @@ public class LetterRenderer {
     private static TemplateEngine engine(TemplateMode mode) {
         var resolver = new StringTemplateResolver();
         resolver.setTemplateMode(mode);
-        resolver.setCacheable(false);   // the template text itself is the key; templates are few and small
+        // The template text itself is the cache key: each version is parsed once, a new version is simply a new key
+        resolver.setCacheable(true);
         var engine = new TemplateEngine();
         engine.setTemplateResolver(resolver);
         return engine;

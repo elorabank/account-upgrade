@@ -10,10 +10,18 @@ import com.bank.upgrade.communication.domain.WelcomeLetter;
 import com.bank.upgrade.communication.domain.WelcomeLetterRepository;
 import jakarta.mail.MessagingException;
 import jakarta.mail.SendFailedException;
+import jakarta.mail.internet.MimeMessage;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.mail.MailException;
@@ -27,7 +35,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Sends the letters that are due. Each round locks a batch of PENDING letters (SKIP LOCKED, so instances never send
- * the same letter), sends them, and records each result with its event in the same transaction.
+ * the same letter), splits it over {@code connections} SMTP connections that send in parallel, each carrying its
+ * share of the batch over one connection, and records each result with its event in the same transaction.
  * <p>
  * A mail server that is down or slow is retried with growing waits up to {@code maxAttempts}; an address the server
  * rejects fails at once. If the service stops after the server accepted an email but before the transaction
@@ -58,41 +67,87 @@ public class LetterSender {
     public int sendDue() {
         Integer tried = tx.execute(status -> {
             var due = letters.lockDue(clock.instant(), properties.batchSize());
-            due.forEach(this::sendOne);
+            if (due.isEmpty()) {
+                return 0;
+            }
+            Map<WelcomeLetter, Exception> problems = sendAll(due);
+            for (WelcomeLetter letter : due) {
+                try (var scope = CorrelationId.open(letter.getCorrelationId())) {
+                    letter.setAttempts(letter.getAttempts() + 1);
+                    record(letter, problems.get(letter));
+                }
+            }
             return due.size();
         });
         return tried == null ? 0 : tried;
     }
 
-    private void sendOne(WelcomeLetter letter) {
-        try (var scope = CorrelationId.open(letter.getCorrelationId())) {
-            letter.setAttempts(letter.getAttempts() + 1);
+    /**
+     * Sends the batch over several connections at once and returns what went wrong per letter (absent = sent).
+     * Never throws: a connection that fails takes its share of the batch with it, as one problem each.
+     */
+    private Map<WelcomeLetter, Exception> sendAll(List<WelcomeLetter> batch) {
+        Map<WelcomeLetter, Exception> problems = new ConcurrentHashMap<>();
+        Map<MimeMessage, WelcomeLetter> messages = new LinkedHashMap<>();
+        for (WelcomeLetter letter : batch) {
             try {
-                mail.send(message -> {
-                    var helper = new MimeMessageHelper(message, false, StandardCharsets.UTF_8.name());
-                    helper.setFrom(properties.from(), properties.fromName());
-                    helper.setTo(letter.getRecipient());
-                    helper.setSubject(letter.getSubject());
-                    helper.setText(letter.getHtmlBody(), true);
-                    message.setHeader("X-Letter-Id", String.valueOf(letter.getId()));
-                });
-                sent(letter);
-            } catch (MailException e) {
-                if (permanent(e)) {
-                    failed(letter, "The mail server refused the message: " + e.getMessage());
-                } else if (letter.getAttempts() >= properties.maxAttempts()) {
-                    failed(letter, "Gave up after " + letter.getAttempts() + " attempts. Last error: " + e.getMessage());
-                } else {
-                    retryLater(letter, e);
-                }
-            } catch (RuntimeException e) {
-                // Anything unexpected counts as temporary for this letter only; the rest of the batch still commits
-                if (letter.getAttempts() >= properties.maxAttempts()) {
-                    failed(letter, "Gave up after " + letter.getAttempts() + " attempts. Last error: " + e);
-                } else {
-                    retryLater(letter, e);
-                }
+                messages.put(message(letter), letter);
+            } catch (MessagingException | UnsupportedEncodingException e) {
+                problems.put(letter, new MailPreparationException("The message cannot be built: " + e.getMessage(), e));
             }
+        }
+        List<List<MimeMessage>> shares = split(new ArrayList<>(messages.keySet()), properties.connections());
+        // Virtual threads: a thread per connection that mostly waits on the network costs next to nothing
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (List<MimeMessage> share : shares) {
+                executor.submit(() -> {
+                    try {
+                        mail.send(share.toArray(MimeMessage[]::new));
+                    } catch (MailSendException e) {
+                        if (e.getFailedMessages().isEmpty()) {
+                            share.forEach(m -> problems.put(messages.get(m), e));
+                        } else {
+                            // Only these failed; the others in the share went out
+                            e.getFailedMessages().forEach((m, cause) -> problems.put(messages.get(m), cause));
+                        }
+                    } catch (RuntimeException e) {
+                        share.forEach(m -> problems.put(messages.get(m), e));
+                    }
+                });
+            }
+        }
+        return problems;
+    }
+
+    private MimeMessage message(WelcomeLetter letter) throws MessagingException, UnsupportedEncodingException {
+        MimeMessage message = mail.createMimeMessage();
+        var helper = new MimeMessageHelper(message, false, StandardCharsets.UTF_8.name());
+        helper.setFrom(properties.from(), properties.fromName());
+        helper.setTo(letter.getRecipient());
+        helper.setSubject(letter.getSubject());
+        helper.setText(letter.getHtmlBody(), true);
+        message.setHeader("X-Letter-Id", String.valueOf(letter.getId()));
+        return message;
+    }
+
+    private static List<List<MimeMessage>> split(List<MimeMessage> all, int parts) {
+        int size = Math.max(1, (int) Math.ceil(all.size() / (double) Math.max(parts, 1)));
+        List<List<MimeMessage>> shares = new ArrayList<>();
+        for (int i = 0; i < all.size(); i += size) {
+            shares.add(all.subList(i, Math.min(i + size, all.size())));
+        }
+        return shares;
+    }
+
+    private void record(WelcomeLetter letter, Exception problem) {
+        if (problem == null) {
+            sent(letter);
+        } else if (permanent(problem)) {
+            failed(letter, "The mail server refused the message: " + problem.getMessage());
+        } else if (letter.getAttempts() >= properties.maxAttempts()) {
+            failed(letter, "Gave up after " + letter.getAttempts() + " attempts. Last error: " + problem.getMessage());
+        } else {
+            retryLater(letter, problem);
         }
     }
 
@@ -104,7 +159,7 @@ public class LetterSender {
         outbox.publish(Topics.NOTIFICATION_SENT, letter.getAccountNo(), "NotificationSent", letter.getAccountNo(),
             new NotificationSent(letter.getId(), letter.getUpgradeRequestId(), letter.getAccountNo(), letter.getAttempts(), letter.getSentAt()),
             null);
-        log.info("Welcome email for account {} sent (attempt {})", letter.getAccountNo(), letter.getAttempts());
+        log.debug("Welcome email for account {} sent (attempt {})", letter.getAccountNo(), letter.getAttempts());
     }
 
     private void failed(WelcomeLetter letter, String reason) {
@@ -126,22 +181,20 @@ public class LetterSender {
     }
 
     /** True when sending the same message again cannot work: a malformed message, or recipients the server rejected. */
-    static boolean permanent(MailException e) {
+    static boolean permanent(Exception e) {
         if (e instanceof MailParseException || e instanceof MailPreparationException) {
             return true;
         }
-        if (e instanceof MailSendException send) {
-            for (Exception cause : send.getFailedMessages().values()) {
-                if (cause instanceof SendFailedException rejected
-                        && rejected.getInvalidAddresses() != null && rejected.getInvalidAddresses().length > 0) {
-                    return true;
-                }
-                if (cause instanceof MessagingException && cause.getCause() instanceof UnsupportedEncodingException) {
-                    return true;
-                }
-            }
+        if (e instanceof SendFailedException rejected) {
+            return rejected.getInvalidAddresses() != null && rejected.getInvalidAddresses().length > 0;
         }
-        return false;
+        if (e instanceof MailSendException send) {
+            Map<Object, Exception> causes = new HashMap<>(send.getFailedMessages());
+            return causes.values().stream().anyMatch(cause -> cause instanceof SendFailedException
+                && ((SendFailedException) cause).getInvalidAddresses() != null
+                && ((SendFailedException) cause).getInvalidAddresses().length > 0);
+        }
+        return e instanceof MailException && e.getCause() instanceof UnsupportedEncodingException;
     }
 
     private static String truncate(String s) {

@@ -72,10 +72,19 @@ class MessagingIntegrationTest {
     static final String IN_FAIL = "it.fail";
     static final String IN_CHAIN = "it.chain.in";
     static final String OUT_CHAIN = "it.chain.out";
+    static final String IN_PARALLEL = "it.parallel";
 
     @DynamicPropertySource
     static void kafka(DynamicPropertyRegistry registry) {
         registry.add("bank.kafka.bootstrap-servers", KafkaTestContainer::bootstrapServers);
+        // Created before the consumer starts: a topic with 3 partitions, to see them handled side by side
+        try (var admin = org.apache.kafka.clients.admin.AdminClient.create(Map.of("bootstrap.servers", KafkaTestContainer.bootstrapServers()))) {
+            admin.createTopics(List.of(new org.apache.kafka.clients.admin.NewTopic(IN_PARALLEL, 3, (short) 1))).all().get();
+        } catch (Exception e) {
+            if (!(e.getCause() instanceof org.apache.kafka.common.errors.TopicExistsException)) {
+                throw new IllegalStateException(e);
+            }
+        }
     }
 
     /** Counters the handlers write to and the tests read from. */
@@ -85,6 +94,9 @@ class MessagingIntegrationTest {
         final Map<String, AtomicInteger> failAttempts = new ConcurrentHashMap<>();
         final List<String> failTopicHandled = new CopyOnWriteArrayList<>();
         final AtomicReference<String> chainCorrelationInHandler = new AtomicReference<>();
+        final AtomicInteger parallelInFlight = new AtomicInteger();
+        final AtomicInteger parallelMaxInFlight = new AtomicInteger();
+        final List<String> parallelHandled = new CopyOnWriteArrayList<>();
     }
 
     /** Wraps the real sender so a test can make Kafka "reject" events. */
@@ -120,6 +132,19 @@ class MessagingIntegrationTest {
         @Bean
         ToggleSender toggleSender(KafkaSender<String, String> kafkaSender) {
             return new ToggleSender(new KafkaOutboxSender(kafkaSender, Duration.ofSeconds(30)));
+        }
+
+        @Bean
+        EventSubscription parallel(Probe probe) {
+            return new EventSubscription(IN_PARALLEL, event -> {
+                probe.parallelMaxInFlight.accumulateAndGet(probe.parallelInFlight.incrementAndGet(), Math::max);
+                try {
+                    Thread.sleep(300);
+                } finally {
+                    probe.parallelInFlight.decrementAndGet();
+                }
+                probe.parallelHandled.add(event.eventType());
+            });
         }
 
         @Bean
@@ -230,6 +255,16 @@ class MessagingIntegrationTest {
             mapper.valueToTree(Map.of("hello", "world"))));
     }
 
+    private void produceTo(String topic, int partition, String key, String value) {
+        var p = base();
+        p.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        p.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        try (var producer = new KafkaProducer<String, String>(p)) {
+            producer.send(new ProducerRecord<>(topic, partition, key, value));
+            producer.flush();
+        }
+    }
+
     private void produce(String topic, String key, String value, String correlationHeader) {
         var p = base();
         p.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
@@ -335,6 +370,24 @@ class MessagingIntegrationTest {
     // ---------- consumer ----------
 
     @Test
+    void partitionsAreHandledSideBySideAndEachInOrder() throws Exception {
+        for (int i = 0; i < 6; i++) {
+            int partition = i % 3;
+            produceTo(IN_PARALLEL, partition, "key-" + partition, envelope(UUID.randomUUID().toString(), "P" + partition + "-" + i, null));
+        }
+
+        await().atMost(Duration.ofSeconds(20)).until(() -> probe.parallelHandled.size() == 6);
+
+        // 6 handlers of 300 ms one after another would never overlap; per partition they do
+        assertThat(probe.parallelMaxInFlight.get()).isBetween(2, 3);
+        // within a partition the order is kept: P0-0 before P0-3, P1-1 before P1-4, P2-2 before P2-5
+        var order = probe.parallelHandled;
+        assertThat(order.indexOf("P0-0")).isLessThan(order.indexOf("P0-3"));
+        assertThat(order.indexOf("P1-1")).isLessThan(order.indexOf("P1-4"));
+        assertThat(order.indexOf("P2-2")).isLessThan(order.indexOf("P2-5"));
+    }
+
+    @Test
     void redeliveredEventIsHandledOnlyOnce() throws Exception {
         String id = UUID.randomUUID().toString();
         String message = envelope(id, "Dup", "corr-dup");
@@ -369,7 +422,8 @@ class MessagingIntegrationTest {
         assertThat(parked.value()).as("the original message, with its correlation id, is kept untouched").contains("corr-dlt");
 
         await().atMost(Duration.ofSeconds(30)).until(() -> probe.failTopicHandled.contains(good));
-        assertThat(probe.failAttempts.get(bad).get()).as("max-attempts=3").isEqualTo(3);
+        // once inside its batch, then max-attempts=3 on its own before it is parked
+        assertThat(probe.failAttempts.get(bad).get()).isBetween(3, 4);
         assertThat(processed.existsById(bad)).as("a failed event is not marked processed").isFalse();
     }
 

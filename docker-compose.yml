@@ -33,6 +33,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # Topics are created on first use; 6 partitions let up to 6 copies of a service share a topic's messages
+      KAFKA_NUM_PARTITIONS: 6
 
   # Web UI for the local Kafka: topics, messages (with headers), consumer groups and their lag.
   kafka-ui:

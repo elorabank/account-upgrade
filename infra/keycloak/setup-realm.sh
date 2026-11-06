@@ -66,5 +66,6 @@ service_client() {  # client id, allowed scopes...
 }
 service_client account-upgrade-service staging.read   # reads a loaded file's accounts from ingestion
 service_client local-auditor audit.read               # for trying the audit API with curl
+service_client perf-runner upgrade.admin              # perf/run.sh presses "run now" for the load and the upgrade
 
 echo "Realm $REALM ready: users olivia.ops, victor.view, sam.support, ada.audit (password local-pw)"

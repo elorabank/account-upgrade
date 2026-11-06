@@ -210,3 +210,22 @@ from the Security section (password `local-pw`): `olivia.ops` sees and can do ev
 `sam.support` can also resend emails, `ada.audit` sees files, upgrades and the audit trail. Sign out to switch user.
 
 **Working on the UI.** `cd ops-ui && npm run watch` rebuilds into `ops-ui/target/classes/static` on every save; with the gateway running from IntelliJ, reload the page. `mvn verify` builds it with its own Node (`node.version` in the parent pom) and type-checks it first.
+
+## Performance tests (local only)
+
+Scripts in `perf/` drive one complete run, from file to audit trail, and report how long each stage took.
+
+```bash
+perf/run.sh 100000            # generate, upload, run now (load, then upgrade), wait for everything, report
+perf/report.sh 20300102       # the timeline of one run again (default: the latest)
+perf/reset.sh                 # optional: deletes ALL local data (database rows, Kafka, SFTP, Mailpit), asks first
+```
+
+Start the services first with the `local` profile; for realistic numbers give the simulated core system a delay, for
+example `BANK_UPGRADE_SIMULATED_LATENCY=50ms` (and optionally `BANK_UPGRADE_SIMULATED_FAILURE_RATE=0.01`). `run.sh`
+presses "run now" as Keycloak's `perf-runner` client, so the schedules are not involved. Reports are saved in
+`perf/reports/` (git-ignored). Each run gets its own business date from 2030-01-01 on, so runs sit side by side and the
+report picks one out; `perf/reset.sh` is only needed to free space or start from zero.
+
+An Excel sheet holds at most 1,048,576 rows, so the largest file is 1,048,575 accounts. Oracle Free stores at most
+12 GB of data; a million-account run fits after the volume changes below, but not comfortably before them.
