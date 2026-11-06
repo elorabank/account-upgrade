@@ -10,8 +10,8 @@ jobs:
       # Repository secret (free key from https://nvd.nist.gov/developers/request-an-api-key); without it the check is skipped
       NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21

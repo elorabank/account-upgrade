@@ -10,10 +10,10 @@ jobs:
       # Repository secret; without it the Sonar step is skipped (see README "CI checks")
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # Sonar compares with earlier commits (new code, blame)
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
