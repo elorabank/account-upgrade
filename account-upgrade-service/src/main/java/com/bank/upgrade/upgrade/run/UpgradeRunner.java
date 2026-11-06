@@ -12,6 +12,10 @@ import com.bank.upgrade.upgrade.gateway.AccountUpgradeGateway;
 import com.bank.upgrade.upgrade.gateway.GatewayRejectedException;
 import com.bank.upgrade.upgrade.gateway.GatewayUnavailableException;
 import com.bank.upgrade.upgrade.gateway.UpgradeCommand;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.sql.PreparedStatement;
 import java.time.Clock;
 import java.time.Instant;
@@ -21,6 +25,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -62,6 +67,11 @@ import reactor.util.retry.Retry;
  * next run and counts one attempt, and after {@code maxAttempts} runs it becomes FAILED. If
  * {@code abortAfterConsecutiveFailures} accounts in a row cannot be reached, the run stops starting new calls (calls
  * already in flight finish), so an outage does not use up every account's attempts.
+ * <p>
+ * Metrics (each copy reports its own; Prometheus tells them apart by instance): {@code upgrade.core.call} per try, by
+ * outcome; {@code upgrade.core.limit.wait}, time spent waiting for the shared limit; {@code upgrade.requests}, finished
+ * requests by result; {@code upgrade.leases.taken.over}; and the gauges {@code upgrade.requests.held} and
+ * {@code upgrade.run.active}.
  */
 public class UpgradeRunner {
 
@@ -94,17 +104,21 @@ public class UpgradeRunner {
     private final Clock clock;
     private final String copy;
     private final AtomicBoolean busy = new AtomicBoolean();
+    private final MeterRegistry meters;
+    private final AtomicInteger held = new AtomicInteger();
+    private final Timer limitWait;
+    private final Counter takenOver;
 
     public UpgradeRunner(UpgradeRequestRepository requests, AccountUpgradeGateway gateway, CoreCallLimiter limiter,
             OutboxService outbox, UpgradeProperties properties, PlatformTransactionManager transactionManager,
-            JdbcTemplate jdbc, Clock clock) {
-        this(requests, gateway, limiter, outbox, properties, transactionManager, jdbc, clock, properties.instanceId());
+            JdbcTemplate jdbc, Clock clock, MeterRegistry meters) {
+        this(requests, gateway, limiter, outbox, properties, transactionManager, jdbc, clock, meters, properties.instanceId());
     }
 
     /** With an explicit copy name: tests use this to play several copies in one JVM. */
     public UpgradeRunner(UpgradeRequestRepository requests, AccountUpgradeGateway gateway, CoreCallLimiter limiter,
             OutboxService outbox, UpgradeProperties properties, PlatformTransactionManager transactionManager,
-            JdbcTemplate jdbc, Clock clock, String copy) {
+            JdbcTemplate jdbc, Clock clock, MeterRegistry meters, String copy) {
         this.requests = requests;
         this.gateway = gateway;
         this.limiter = limiter;
@@ -114,6 +128,19 @@ public class UpgradeRunner {
         this.jdbc = jdbc;
         this.clock = clock;
         this.copy = copy;
+        this.meters = meters;
+        Gauge.builder("upgrade.run.active", busy, b -> b.get() ? 1 : 0)
+            .description("1 while this copy works on a run").register(meters);
+        Gauge.builder("upgrade.requests.held", held, AtomicInteger::get)
+            .description("Requests this copy has claimed and not yet finished").register(meters);
+        Gauge.builder("upgrade.core.limit.per.second", properties, UpgradeProperties::coreCallsPerSecond)
+            .description("Core calls per second allowed for all copies together (0 = no shared limit)").register(meters);
+        this.limitWait = Timer.builder("upgrade.core.limit.wait")
+            .description("Time a core call waited for the shared per-second limit")
+            .publishPercentileHistogram().minimumExpectedValue(Duration.ofMillis(1)).maximumExpectedValue(Duration.ofSeconds(5))
+            .register(meters);
+        this.takenOver = Counter.builder("upgrade.leases.taken.over")
+            .description("Requests taken over from a copy whose lease ran out").register(meters);
     }
 
     public String copy() {
@@ -174,6 +201,7 @@ public class UpgradeRunner {
                 // Claimed but never called: back to PENDING for the next run (only this copy's claims)
                 tx.executeWithoutResult(s -> requests.releaseClaims(copy));
             }
+            held.set(0);
             var summary = new Summary(runId, copy, counts.upgraded.get(), counts.failed.get(), counts.deferred.get(),
                 counts.errors.get(), stop.get());
             log.info("Upgrade run finished: {}", summary);
@@ -231,9 +259,11 @@ public class UpgradeRunner {
                 return List.<Claimed>of();
             }
             Instant until = now.plus(properties.lease());
+            held.addAndGet(ids.size());
             return requests.findAllById(ids).stream().map(r -> {
                 if (UpgradeRequest.IN_PROGRESS.equals(r.getStatus())) {
                     log.warn("Taking over request {} from copy {} whose lease ran out", r.getId(), r.getClaimedBy());
+                    takenOver.increment();
                 }
                 r.setStatus(UpgradeRequest.IN_PROGRESS);
                 r.setRunId(runId);
@@ -260,7 +290,17 @@ public class UpgradeRunner {
         }
         var command = new UpgradeCommand(r.accountNo() + ":" + r.businessDate(), r.accountNo(), r.currentType(), r.targetType());
         // Each try first gets permission from the shared limit, then calls the core system
-        return Mono.defer(() -> limiter.acquire().then(Mono.defer(() -> gateway.upgrade(command))))
+        return Mono.defer(() -> {
+                long waitStart = System.nanoTime();
+                return limiter.acquire()
+                    .doOnSuccess(v -> limitWait.record(System.nanoTime() - waitStart, TimeUnit.NANOSECONDS))
+                    .then(Mono.defer(() -> {
+                        long callStart = System.nanoTime();
+                        return gateway.upgrade(command)
+                            .doOnSuccess(v -> timeCall("ok", callStart))
+                            .doOnError(e -> timeCall(outcomeOf(e), callStart));
+                    }));
+            })
             .retryWhen(quickRetries())
             .thenReturn(new Outcome(r, Kind.UPGRADED, null))
             .onErrorResume(GatewayRejectedException.class, e -> Mono.just(new Outcome(r, Kind.REFUSED, e.getMessage())))
@@ -270,6 +310,24 @@ public class UpgradeRunner {
                 log.error("Upgrade call for request {} failed unexpectedly", r.id(), e);
                 return Mono.just(new Outcome(r, Kind.ERROR, e.toString()));
             });
+    }
+
+    private void timeCall(String outcome, long started) {
+        Timer.builder("upgrade.core.call").description("Calls to the core system, one per try, by outcome")
+            .tag("outcome", outcome)
+            .publishPercentileHistogram().minimumExpectedValue(Duration.ofMillis(1)).maximumExpectedValue(Duration.ofSeconds(30))
+            .register(meters).record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
+    }
+
+    private static String outcomeOf(Throwable e) {
+        return e instanceof GatewayRejectedException ? "refused" : e instanceof GatewayUnavailableException ? "unavailable" : "error";
+    }
+
+    private void finished(String result, int n) {
+        if (n > 0) {
+            Counter.builder("upgrade.requests").description("Requests this copy finished, by result")
+                .tag("result", result).register(meters).increment(n);
+        }
     }
 
     /** Up to inlineAttempts tries in all, waiting retryBackoff, then twice that, ... Only for "unavailable". */
@@ -296,13 +354,20 @@ public class UpgradeRunner {
 
     /** Saves a batch of outcomes, and their events, in one transaction. */
     private void record(List<Outcome> outcomes, Counts counts) {
+        held.addAndGet(-outcomes.size());
         var toSave = outcomes.stream().filter(o -> o.kind() != Kind.SKIPPED && o.kind() != Kind.ERROR).toList();
-        counts.errors.addAndGet((int) outcomes.stream().filter(o -> o.kind() == Kind.ERROR).count());
+        int errors = (int) outcomes.stream().filter(o -> o.kind() == Kind.ERROR).count();
+        counts.errors.addAndGet(errors);
+        finished("error", errors);
+        finished("skipped", (int) outcomes.stream().filter(o -> o.kind() == Kind.SKIPPED).count());
         if (toSave.isEmpty()) {
             return;
         }
+        // Counted once the transaction has committed, so a rollback is not counted twice
+        Map<String, Integer> results = new java.util.HashMap<>();
         try {
             tx.executeWithoutResult(s -> {
+                results.clear();
                 Map<Long, UpgradeRequest> byId = requests.findAllById(toSave.stream().map(o -> o.request().id()).toList())
                     .stream().collect(Collectors.toMap(UpgradeRequest::getId, Function.identity()));
                 for (Outcome o : toSave) {
@@ -311,21 +376,25 @@ public class UpgradeRunner {
                         // This copy's lease ran out and another copy took the request over; its outcome counts
                         log.warn("Request {} is no longer held by copy {}, not recording", o.request().id(), copy);
                         counts.errors.incrementAndGet();
+                        results.merge("lost", 1, Integer::sum);
                         continue;
                     }
                     try (var scope = CorrelationId.open(o.request().correlationId())) {
-                        apply(r, o, counts);
+                        results.merge(apply(r, o, counts), 1, Integer::sum);
                     }
                 }
             });
+            results.forEach(this::finished);
         } catch (RuntimeException e) {
             // The core calls may have succeeded; these requests stay IN_PROGRESS and are repeated next run
             log.error("{} outcome(s) could not be recorded, they are retried in the next run", toSave.size(), e);
             counts.errors.addAndGet(toSave.size());
+            finished("error", toSave.size());
         }
     }
 
-    private void apply(UpgradeRequest r, Outcome o, Counts counts) {
+    /** Saves one outcome; returns the result for the metrics. */
+    private String apply(UpgradeRequest r, Outcome o, Counts counts) {
         r.setAttemptCount(r.getAttemptCount() + 1);
         r.setClaimedBy(null);
         r.setClaimedUntil(null);
@@ -338,20 +407,24 @@ public class UpgradeRunner {
                         r.getCurrentType(), r.getTargetType(), r.getBusinessDate(), clock.instant()),
                     null);
                 counts.upgraded.incrementAndGet();
+                return "upgraded";
             }
             case REFUSED -> {
                 fail(r, o.reason());
                 counts.failed.incrementAndGet();
+                return "failed";
             }
             case UNAVAILABLE -> {
                 if (r.getAttemptCount() >= properties.maxAttempts()) {
                     fail(r, "Gave up after " + r.getAttemptCount() + " runs. Last error: " + o.reason());
                     counts.failed.incrementAndGet();
+                    return "failed";
                 } else {
                     // Stays attached to this run's id so the run does not pick it up again
                     r.setStatus(UpgradeRequest.PENDING);
                     r.setReason(truncate("Core system unavailable: " + o.reason()));
                     counts.deferred.incrementAndGet();
+                    return "deferred";
                 }
             }
             default -> throw new IllegalStateException("not recorded: " + o.kind());

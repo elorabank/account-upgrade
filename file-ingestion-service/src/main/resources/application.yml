@@ -26,3 +26,12 @@ bank:
       username: ${SFTP_USER:}
       password: ${SFTP_PASSWORD:}
       host-key-fingerprint: ${SFTP_HOST_KEY:}   # required outside local development
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus   # /actuator/prometheus needs the metrics.read scope
+  metrics:
+    tags:
+      application: ${spring.application.name}   # Grafana groups by service; copies differ by instance

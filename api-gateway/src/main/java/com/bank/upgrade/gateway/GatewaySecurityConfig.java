@@ -2,6 +2,7 @@ package com.bank.upgrade.gateway;
 
 import static org.springframework.security.config.Customizer.withDefaults;
 
+import com.bank.upgrade.common.security.Roles;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -45,6 +46,8 @@ import reactor.core.publisher.Mono;
 class GatewaySecurityConfig {
 
     private static final String[] OPEN = {"/actuator/health/**", "/actuator/info"};
+    /** Only Prometheus's own client (scope metrics.read) reads metrics; a signed-in person never does. */
+    private static final String METRICS = "/actuator/prometheus";
 
     @Bean
     @Order(1)
@@ -53,7 +56,9 @@ class GatewaySecurityConfig {
             .securityMatcher(GatewaySecurityConfig::hasBearerToken)
             .csrf(ServerHttpSecurity.CsrfSpec::disable)
             .securityContextRepository(NoOpServerSecurityContextRepository.getInstance())
-            .authorizeExchange(a -> a.pathMatchers(OPEN).permitAll().anyExchange().authenticated())
+            .authorizeExchange(a -> a.pathMatchers(OPEN).permitAll()
+                .pathMatchers(METRICS).hasAuthority(Roles.SCOPE_METRICS_READ)
+                .anyExchange().authenticated())
             .oauth2ResourceServer(o -> o.jwt(withDefaults()))
             .build();
     }
@@ -72,7 +77,7 @@ class GatewaySecurityConfig {
             // The single-page app sends the cookie's raw value back, so the token is not masked per request
             .csrf(c -> c.csrfTokenRepository(CookieServerCsrfTokenRepository.withHttpOnlyFalse())
                 .csrfTokenRequestHandler(new ServerCsrfTokenRequestAttributeHandler()))
-            .authorizeExchange(a -> a.pathMatchers(OPEN).permitAll().anyExchange().authenticated())
+            .authorizeExchange(a -> a.pathMatchers(OPEN).permitAll().pathMatchers(METRICS).denyAll().anyExchange().authenticated())
             .oauth2Login(o -> o.authorizationRequestResolver(pkceResolver))
             .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint))
             // POST /logout ends the session here and at the identity provider, then returns to the start page

@@ -7,6 +7,9 @@ import com.bank.upgrade.common.persistence.processed.ProcessedEvent;
 import com.bank.upgrade.common.persistence.processed.ProcessedEventRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -29,6 +32,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.kafka.receiver.KafkaReceiver;
+import reactor.kafka.receiver.MicrometerConsumerListener;
 import reactor.kafka.receiver.ReceiverOptions;
 import reactor.kafka.receiver.ReceiverRecord;
 import reactor.kafka.sender.KafkaSender;
@@ -52,6 +56,9 @@ import reactor.util.retry.Retry;
  * are keyed by what they are about (for example the account), so everything about one account stays in order while
  * a topic with N partitions is worked on N at a time. If the dead-letter topic cannot be written the consumer
  * restarts from the last acknowledged offset rather than skipping the message.
+ * <p>
+ * Metrics: {@code bank.events.consumed} (by topic and result: processed, duplicate, dead-lettered),
+ * {@code bank.events.handling} (time per batch), and the Kafka consumer's own metrics, among them the lag per partition.
  */
 public class EventConsumer implements SmartLifecycle {
 
@@ -66,6 +73,7 @@ public class EventConsumer implements SmartLifecycle {
     private final TransactionTemplate transaction;
     private final ObjectMapper mapper;
     private final ConsumerProperties properties;
+    private final MeterRegistry meters;
     private volatile Disposable running;
 
     public EventConsumer(
@@ -75,7 +83,8 @@ public class EventConsumer implements SmartLifecycle {
             ProcessedEventRepository processed,
             TransactionTemplate transaction,
             ObjectMapper mapper,
-            ConsumerProperties properties) {
+            ConsumerProperties properties,
+            MeterRegistry meters) {
         this.handlers = Map.copyOf(handlers);
         this.consumerProperties = consumerProperties;
         this.deadLetterSender = deadLetterSender;
@@ -83,6 +92,7 @@ public class EventConsumer implements SmartLifecycle {
         this.transaction = transaction;
         this.mapper = mapper;
         this.properties = properties;
+        this.meters = meters;
     }
 
     @Override
@@ -93,7 +103,8 @@ public class EventConsumer implements SmartLifecycle {
         ReceiverOptions<String, String> options = ReceiverOptions.<String, String>create(consumerProperties)
             .subscription(handlers.keySet())
             .commitInterval(Duration.ofSeconds(1))
-            .commitBatchSize(100);
+            .commitBatchSize(100)
+            .consumerListener(new MicrometerConsumerListener(meters));
         log.info("Consuming {}", handlers.keySet());
         running = Flux.defer(() -> KafkaReceiver.create(options).receive())
             .groupBy(record -> record.receiverOffset().topicPartition())
@@ -125,6 +136,8 @@ public class EventConsumer implements SmartLifecycle {
 
     /** One attempt at a whole batch. Blocking: runs on a boundedElastic thread. Any failure rolls back all of it. */
     private void handleBatch(List<ReceiverRecord<String, String>> records) {
+        String batchTopic = records.get(0).topic();
+        long started = System.nanoTime();
         Map<String, EventEnvelope> events = new LinkedHashMap<>();
         Map<String, String> topics = new HashMap<>();
         Map<String, String> headerIds = new HashMap<>();
@@ -134,7 +147,7 @@ public class EventConsumer implements SmartLifecycle {
             topics.putIfAbsent(event.eventId(), record.topic());
             headerIds.putIfAbsent(event.eventId(), CorrelationId.sanitize(headerValue(record.headers().toArray(), CorrelationId.KAFKA_HEADER)));
         }
-        transaction.executeWithoutResult(status -> {
+        Integer handled = transaction.execute(status -> {
             Set<String> done = new HashSet<>();
             processed.findAllById(events.keySet()).forEach(p -> done.add(p.getEventId()));
             var fresh = events.values().stream().filter(e -> !done.contains(e.eventId())).toList();
@@ -147,7 +160,12 @@ public class EventConsumer implements SmartLifecycle {
                     invoke(handlers.get(topic), event);
                 }
             }
+            return fresh.size();
         });
+        int fresh = handled == null ? 0 : handled;
+        handlingTimer(batchTopic).record(System.nanoTime() - started, java.util.concurrent.TimeUnit.NANOSECONDS);
+        count(batchTopic, "processed", fresh);
+        count(batchTopic, "duplicate", records.size() - fresh);
     }
 
     private Mono<Void> process(ReceiverRecord<String, String> record) {
@@ -173,8 +191,10 @@ public class EventConsumer implements SmartLifecycle {
         try (var scope = CorrelationId.open(correlationId)) {
             if (processed.existsById(event.eventId())) {
                 log.info("Skipping already processed event {} ({})", event.eventId(), event.eventType());
+                count(record.topic(), "duplicate", 1);
                 return;
             }
+            long started = System.nanoTime();
             try {
                 transaction.executeWithoutResult(status -> {
                     // flushed first: a concurrent duplicate fails here, before the handler does any work
@@ -184,10 +204,13 @@ public class EventConsumer implements SmartLifecycle {
             } catch (DataIntegrityViolationException e) {
                 if (processed.existsById(event.eventId())) {
                     log.info("Skipping event {} handled concurrently elsewhere", event.eventId());
+                    count(record.topic(), "duplicate", 1);
                     return;
                 }
                 throw e;
             }
+            handlingTimer(record.topic()).record(System.nanoTime() - started, java.util.concurrent.TimeUnit.NANOSECONDS);
+            count(record.topic(), "processed", 1);
         }
     }
 
@@ -228,7 +251,20 @@ public class EventConsumer implements SmartLifecycle {
         var parked = new ProducerRecord<String, String>(topic, null, record.key(), record.value(), headers);
         return deadLetterSender.send(Mono.just(SenderRecord.create(parked, record.offset())))
             .next()
-            .flatMap(result -> result.exception() != null ? Mono.<Void>error(result.exception()) : Mono.<Void>empty());
+            .flatMap(result -> result.exception() != null ? Mono.<Void>error(result.exception()) : Mono.<Void>empty())
+            .doOnSuccess(done -> count(record.topic(), "dead-lettered", 1));
+    }
+
+    private void count(String topic, String result, int n) {
+        if (n > 0) {
+            Counter.builder("bank.events.consumed").description("Events read from Kafka, by what happened to them")
+                .tag("topic", topic).tag("result", result).register(meters).increment(n);
+        }
+    }
+
+    private Timer handlingTimer(String topic) {
+        return Timer.builder("bank.events.handling").description("Time to handle events in one database transaction")
+            .tag("topic", topic).register(meters);
     }
 
     private static String headerValue(Header[] headers, String name) {

@@ -346,11 +346,12 @@ class UpgradeFlowTest {
 
         assertThat(summary.aborted()).isTrue();
         assertThat(summary.deferred()).isEqualTo(5);
-        // Accounts the run never reached are untouched and ready for the next run
-        assertThat(request("A6").getStatus()).isEqualTo(UpgradeRequest.PENDING);
-        assertThat(request("A6").getAttemptCount()).isZero();
-        assertThat(request("A7").getStatus()).isEqualTo(UpgradeRequest.PENDING);
-        assertThat(request("A7").getAttemptCount()).isZero();
+        // The two accounts the run never reached (claims have no fixed order) are untouched and ready for the next run
+        var all = java.util.stream.Stream.of("A1", "A2", "A3", "A4", "A5", "A6", "A7").map(this::request).toList();
+        assertThat(all).allMatch(r -> UpgradeRequest.PENDING.equals(r.getStatus()));
+        assertThat(all).filteredOn(r -> r.getAttemptCount() == 1).hasSize(5);
+        assertThat(all).filteredOn(r -> r.getAttemptCount() == 0).hasSize(2)
+            .allMatch(r -> r.getClaimedBy() == null && r.getClaimedUntil() == null);
     }
 
     @Test

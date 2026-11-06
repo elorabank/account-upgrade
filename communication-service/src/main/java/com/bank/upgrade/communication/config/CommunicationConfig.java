@@ -1,5 +1,6 @@
 package com.bank.upgrade.communication.config;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import com.bank.upgrade.common.events.AccountUpgraded;
 import com.bank.upgrade.common.events.Topics;
 import com.bank.upgrade.common.messaging.EventSubscription;
@@ -57,8 +58,9 @@ public class CommunicationConfig {
 
     @Bean
     LetterSender letterSender(WelcomeLetterRepository letters, JavaMailSender mail, OutboxService outbox,
-            CommunicationProperties properties, PlatformTransactionManager transactionManager, Clock clock) {
-        return new LetterSender(letters, mail, outbox, properties, transactionManager, clock);
+            CommunicationProperties properties, PlatformTransactionManager transactionManager, Clock clock,
+            MeterRegistry meters) {
+        return new LetterSender(letters, mail, outbox, properties, transactionManager, clock, meters);
     }
 
     /** Off in tests that drive sending themselves ({@code bank.communication.schedule.enabled=false}). */

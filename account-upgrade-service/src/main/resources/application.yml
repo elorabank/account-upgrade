@@ -35,6 +35,13 @@ spring:
         enabled: ${REDIS_SSL:false}
 
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus   # /actuator/prometheus needs the metrics.read scope
+  metrics:
+    tags:
+      application: ${spring.application.name}   # Grafana groups by service; copies differ by instance
   health:
     # Without Redis the limit is skipped (calls still capped per copy), so it does not make the service DOWN
     redis:

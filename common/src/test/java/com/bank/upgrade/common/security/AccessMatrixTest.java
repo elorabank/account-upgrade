@@ -88,7 +88,8 @@ class AccessMatrixTest {
         Map.entry("svc upgrade.read", JWT.service("svc-b", "upgrade.read")),
         Map.entry("svc audit.read", JWT.service("svc-c", "audit.read")),
         Map.entry("svc notification.resend", JWT.service("svc-d", "notification.resend")),
-        Map.entry("svc staging.read", JWT.service("svc-e", "staging.read")));
+        Map.entry("svc staging.read", JWT.service("svc-e", "staging.read")),
+        Map.entry("svc metrics.read", JWT.service("prometheus", "metrics.read")));
 
     record Endpoint(HttpMethod method, String path, List<String> allowed) {}
 
@@ -107,6 +108,7 @@ class AccessMatrixTest {
         new Endpoint(HttpMethod.GET, "/api/upgrades/summary", ANY_ROLE_OR_READ),
         new Endpoint(HttpMethod.GET, "/api/files/3/errors", ANY_ROLE_OR_READ),
         new Endpoint(HttpMethod.GET, "/internal/files/12/accounts", List.of("svc staging.read")),
+        new Endpoint(HttpMethod.GET, "/actuator/prometheus", List.of("svc metrics.read")),
         // nothing grants these: wrong method, or no rule yet
         new Endpoint(HttpMethod.DELETE, "/api/files/1", List.of()),
         new Endpoint(HttpMethod.POST, "/api/notifications/summary", List.of()),
@@ -157,8 +159,8 @@ class AccessMatrixTest {
     void healthIsOpenButOtherActuatorPathsNeedAToken() {
         client.get().uri("/actuator/health").exchange().expectStatus().isOk();
         client.get().uri("/actuator/health/liveness").exchange().expectStatus().isOk();
-        client.get().uri("/actuator/prometheus").exchange().expectStatus().isUnauthorized();
-        client.get().uri("/actuator/prometheus").headers(h -> h.setBearerAuth(JWT.service("prometheus"))).exchange().expectStatus().isOk();
+        client.get().uri("/actuator/env").exchange().expectStatus().isUnauthorized();
+        client.get().uri("/actuator/env").headers(h -> h.setBearerAuth(JWT.service("svc-x"))).exchange().expectStatus().isOk();
     }
 
     @Test

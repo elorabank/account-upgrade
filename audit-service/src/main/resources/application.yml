@@ -14,3 +14,12 @@ spring:
 bank:
   processed-events:
     enabled: true      # shared PROCESSED_EVENT table (consumer de-duplication)
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus   # /actuator/prometheus needs the metrics.read scope
+  metrics:
+    tags:
+      application: ${spring.application.name}   # Grafana groups by service; copies differ by instance
