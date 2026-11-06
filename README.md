@@ -281,7 +281,8 @@ the repository secret `NVD_API_KEY`; without it the run only warns. Locally: `NV
 install org.owasp:dependency-check-maven:aggregate`, report in `target/dependency-check-report.html` (the first run
 downloads the database, which takes a while).
 
-Dependabot (`.github/dependabot.yml`) opens weekly pull requests with newer versions of the Maven dependencies, the
+Dependabot (`.github/dependabot.yml`) is **paused** for now (every pull-request limit is 0; set the limits back to
+resume). When on, it opens weekly pull requests with newer versions of the Maven dependencies, the
 ops console's npm packages and the GitHub actions, and monthly for the docker-compose images; CI checks each one. It
 proposes minor and patch versions only (any version for the GitHub actions): a major version such as Spring Boot 4 is a
 migration to do on purpose, not a weekly update. The same goes for Spring Cloud 2025.1, which looks like a minor
