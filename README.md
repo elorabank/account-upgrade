@@ -5,7 +5,7 @@ Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 | Module | Port | Purpose |
 |---|---|---|
 | common | - | Shared library: Kafka topics and event envelope, outbox + consumer template, scheduler locks, correlation id, Okta resource-server security |
-| common-test | - | Test-only helpers (Oracle Testcontainer) |
+| common-test | - | Test-only helpers: signed test tokens, `@ApiTest`, a transaction manager without a database |
 | file-ingestion-service | 8081 | SFTP fetch, Excel load |
 | account-upgrade-service | 8082 | Daily upgrade job |
 | communication-service | 8083 | Welcome letter HTML, sent as the email body |
@@ -17,7 +17,7 @@ Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 
 ```bash
 docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak, Redis, Prometheus, Grafana
-mvn clean verify          # build and test (tests never connect to this Kafka; see the surefire setting in each service pom)
+mvn clean verify          # build and test: about 2 minutes, no Docker needed (see Tests)
 SPRING_PROFILES_ACTIVE=local mvn -pl file-ingestion-service spring-boot:run
 ```
 
@@ -37,6 +37,25 @@ Open the project folder (it is a Maven project). Shared run configurations are i
 (load every minute, upgrade at :30 past each minute). `Extra upgrade copies` starts two more upgrade copies (ports
 8092 and 8102) next to them.
 The project SDK must be JDK 21, and annotation processing must be on (Lombok).
+
+### Tests
+
+`mvn verify` runs plain unit and API tests: no containers and no database, so it needs no Docker and runs the same
+in CI (`.github/workflows/ci.yml`, on every pull request and push to `main`).
+
+| Kind | What it covers | How |
+|---|---|---|
+| Unit tests | the upgrade run (calls, retries, outcomes, events, leases, takeovers, metrics), planning, the rate limit, the Excel reader and row rules, the load run (which files are loaded, skipped, failed or resumed, where they are moved), letters and email sending, the outbox poller and sender, the Kafka consumer (de-duplication, retries, dead letters, correlation ids), the audit recorder | JUnit and Mockito; repositories, Kafka, SFTP, the mail server and the core system are mocks or small fakes |
+| API tests | every REST endpoint: status codes, JSON, paging, audit events for user actions | `@ApiTest` (common-test): the controllers and the real security chain with signed test tokens; everything behind the controllers is mocked |
+| Access rules | every endpoint against every role and scope, bad tokens | `AccessMatrixTest` (common) |
+
+What these tests cannot show, because it lives in Oracle, Kafka or Redis themselves: the SQL (the `SKIP LOCKED`
+claim, the outbox and Spring Batch tables, the Liquibase scripts), several copies working on one run at the same time,
+Kafka's ordering and redelivery, and gateway sessions surviving a restart. Check those locally against the compose
+stack: start the services and run `perf/run.sh` (and, for several copies, IntelliJ's `Extra upgrade copies`).
+
+Tests never reach the Kafka of `docker compose`: each service pom points them at `127.0.0.1:1`. The test token helper
+is `TestJwt`; `@ApiTest` tests verify its tokens for signature, issuer, audience and expiry as in production.
 
 ### Test data
 
