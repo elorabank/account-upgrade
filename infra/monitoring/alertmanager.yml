@@ -1,0 +1,19 @@
+# Alertmanager: groups the alerts Prometheus sends and emails them. Locally the "ops team" mailbox is Mailpit
+# (http://localhost:8025); in the cloud this would be the team's real address, chat or paging tool.
+global:
+  smtp_smarthost: mailpit:1025
+  smtp_from: alerts@bank.example
+  smtp_require_tls: false   # Mailpit has no TLS; a real mail server must use it
+
+route:
+  receiver: ops-team
+  group_by: [alertname, application]
+  group_wait: 30s         # collect alerts that start together into one email
+  group_interval: 5m      # new alerts in an existing group
+  repeat_interval: 4h     # remind while it keeps firing
+
+receivers:
+  - name: ops-team
+    email_configs:
+      - to: ops-team@bank.example
+        send_resolved: true   # also say when it is over

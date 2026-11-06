@@ -1,0 +1,78 @@
+# Alert rules, evaluated by Prometheus every 15 s. Firing alerts go to Alertmanager (alertmanager.yml), which emails
+# them; locally they land in Mailpit (http://localhost:8025). Prometheus > Alerts shows the current state of each rule.
+# "for" is how long the condition must hold before the alert fires, so a blip does not wake anyone.
+groups:
+  - name: services
+    rules:
+      - alert: ServiceDown
+        # Instances marked optional (the extra upgrade copies) are expected to be off most of the time locally
+        expr: up{job="services", optional!="true"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }} on {{ $labels.instance }} is down"
+          description: "Prometheus has not been able to scrape {{ $labels.instance }} for a minute."
+
+  - name: pipeline
+    rules:
+      - alert: EventDeadLettered
+        # Every parked event needs a person to look at it, so this fires at once
+        expr: increase(bank_events_consumed_total{result="dead-lettered"}[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.application }} parked an event from {{ $labels.topic }}"
+          description: "An event failed every attempt and is on {{ $labels.topic }}.DLT. Fix the cause, then replay it."
+
+      - alert: KafkaConsumerLagHigh
+        expr: >
+          label_replace(sum by (application, topic) (kafka_consumer_fetch_manager_records_lag), "topic", "$1.$2", "topic", "([^_]+)_(.+)")
+          > 5000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.application }} is {{ $value }} messages behind on {{ $labels.topic }}"
+          description: "The consumer has been more than 5000 messages behind for 10 minutes and is not catching up."
+
+      - alert: OutboxFallingBehind
+        expr: max by (application) (bank_outbox_oldest_age_seconds) > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.application }} has outbox events waiting for over 5 minutes"
+          description: "Events are written but not reaching Kafka. Is Kafka up? Is the outbox poller running?"
+
+  - name: upgrade
+    rules:
+      - alert: CoreSystemUnavailable
+        # Share of core-system tries that failed as "unavailable"; a run stops itself after 5 in a row anyway
+        expr: >
+          sum(rate(upgrade_core_call_seconds_count{outcome="unavailable"}[5m]))
+            / sum(rate(upgrade_core_call_seconds_count[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "More than 20% of core-system calls fail as unavailable"
+          description: "Upgrades are deferred to the next run. Check the core system and the network to it."
+
+      - alert: UpgradeCopyDied
+        expr: increase(upgrade_leases_taken_over_total[15m]) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "A copy of the upgrade service stopped mid-run; its requests were taken over"
+          description: "Other copies finished its work after its leases ran out. Find out why it stopped."
+
+  - name: email
+    rules:
+      - alert: WelcomeEmailsFailing
+        expr: increase(mail_letters_total{result="failed"}[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Welcome emails failed for good in the last 15 minutes"
+          description: "Rejected addresses or a long mail outage. The console's Emails page lists them; support can resend."

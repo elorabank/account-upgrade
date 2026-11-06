@@ -16,7 +16,7 @@ Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 ## Run locally
 
 ```bash
-docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak, Redis, Prometheus, Grafana
+docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak, Redis, Prometheus, Alertmanager, Grafana
 mvn clean verify          # build and test: about 2 minutes, no Docker needed (see Tests)
 SPRING_PROFILES_ACTIVE=local mvn -pl file-ingestion-service spring-boot:run
 ```
@@ -25,7 +25,7 @@ Run the services with the `local` profile. It holds the local database and SFTP 
 changing host key, and uses Keycloak from docker-compose as the identity provider. Without it a service has no
 passwords and verifies the SFTP host key, which is what every real environment should do.
 
-Mailpit UI: http://localhost:8025 · Kafka UI: http://localhost:8070 · SFTP: localhost:2222 · Oracle: localhost:1521/FREEPDB1 · Keycloak: http://localhost:8180 · Grafana: http://localhost:3000 · Prometheus: http://localhost:9090
+Mailpit UI: http://localhost:8025 · Kafka UI: http://localhost:8070 · SFTP: localhost:2222 · Oracle: localhost:1521/FREEPDB1 · Keycloak: http://localhost:8180 · Grafana: http://localhost:3000 · Prometheus: http://localhost:9090 · Alertmanager: http://localhost:9093
 Schedules run in `bank.time-zone` (env `BANK_TIME_ZONE`, default `Asia/Kolkata`), never in the server's zone.
 Run Maven with JDK 21 (BlockHound does not work on newer JDKs yet).
 
@@ -314,6 +314,24 @@ existed does not have it: recreate it once with `docker compose up -d --force-re
 
 Every metric carries an `application` tag; copies of a service are told apart by Prometheus's `instance` label
 (`localhost:8082`, `localhost:8092`, ...).
+
+**Alerts.** Prometheus checks the rules in `infra/monitoring/alerts.yml` every 15 seconds (Prometheus > Alerts shows
+their state). Firing alerts go to Alertmanager (http://localhost:9093), which groups them and emails
+`ops-team@bank.example`; locally that mailbox is Mailpit (http://localhost:8025), and a "resolved" email follows when
+it is over.
+
+| Alert | Fires when | Severity |
+|---|---|---|
+| `ServiceDown` | a service cannot be scraped for 1 minute (the two extra upgrade copies are marked optional and left out) | critical |
+| `EventDeadLettered` | any event was parked on a dead-letter topic | warning |
+| `KafkaConsumerLagHigh` | a service is more than 5000 messages behind on a topic for 10 minutes | warning |
+| `OutboxFallingBehind` | the oldest unpublished outbox event is older than 5 minutes, for 5 minutes | warning |
+| `CoreSystemUnavailable` | more than 20% of core-system calls fail as unavailable, for 5 minutes | critical |
+| `UpgradeCopyDied` | requests were taken over from a copy whose lease ran out | info |
+| `WelcomeEmailsFailing` | a welcome email failed for good | warning |
+
+With nothing running, `ServiceDown` fires after about a minute and its email arrives a little later: an easy way to
+see the whole path work.
 
 **Changing the dashboard.** It is the file `infra/monitoring/grafana/dashboards/account-upgrade.json`, loaded at
 start and re-read every 10 seconds; edits in the Grafana UI are not kept. Edit it in Grafana, use *Export > Save to
