@@ -4,6 +4,8 @@ databaseChangeLog:
   - include:
       file: db/common/002-processed-event.sql
   - include:
+      file: db/common/005-processed-event-retention.sql
+  - include:
       file: db/changelog/001-upgrade-tables.sql
   - include:
       file: db/changelog/002-upgrade-correlation.sql

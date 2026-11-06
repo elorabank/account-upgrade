@@ -1,5 +1,6 @@
 package com.bank.upgrade.upgrade.config;
 
+import com.bank.upgrade.common.retention.RetentionRule;
 import com.bank.upgrade.common.events.FileLoaded;
 import com.bank.upgrade.common.events.Topics;
 import com.bank.upgrade.common.messaging.EventSubscription;
@@ -111,5 +112,17 @@ public class UpgradeConfig {
     @ConditionalOnProperty(prefix = "bank.upgrade.schedule", name = "enabled", havingValue = "true", matchIfMissing = true)
     UpgradeScheduler upgradeScheduler(UpgradeRunner runner, @Value("${bank.time-zone}") String zone) {
         return new UpgradeScheduler(runner, java.time.ZoneId.of(zone));
+    }
+
+    /**
+     * Finished requests (upgraded, rejected, failed) of business days older than 400 days. Requests still PENDING or
+     * IN_PROGRESS are never deleted; the audit trail keeps the history of every upgrade.
+     */
+    @Bean
+    RetentionRule upgradeRequestsRetention(JdbcTemplate jdbc, @Value("${bank.time-zone}") String zone) {
+        return RetentionRule.olderThanDate("upgrade-requests", java.time.Duration.ofDays(400), jdbc, """
+            DELETE FROM UPGRADE_REQUEST
+            WHERE STATUS IN ('UPGRADED', 'REJECTED', 'FAILED') AND BUSINESS_DATE < ? AND ROWNUM <= ?""",
+            java.time.ZoneId.of(zone));
     }
 }

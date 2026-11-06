@@ -1,5 +1,6 @@
 package com.bank.upgrade.communication.config;
 
+import com.bank.upgrade.common.retention.RetentionRule;
 import io.micrometer.core.instrument.MeterRegistry;
 import com.bank.upgrade.common.events.AccountUpgraded;
 import com.bank.upgrade.common.events.Topics;
@@ -19,6 +20,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -68,5 +70,13 @@ public class CommunicationConfig {
     @ConditionalOnProperty(prefix = "bank.communication.schedule", name = "enabled", havingValue = "true", matchIfMissing = true)
     LetterSendScheduler letterSendScheduler(LetterSender sender, CommunicationProperties properties) {
         return new LetterSendScheduler(sender, properties.batchSize());
+    }
+
+    /** Letters that were sent or failed for good, 400 days after they were written. PENDING letters are never deleted. */
+    @Bean
+    RetentionRule lettersRetention(JdbcTemplate jdbc) {
+        return RetentionRule.olderThanTimestamp("letters", java.time.Duration.ofDays(400), jdbc, """
+            DELETE FROM WELCOME_LETTER
+            WHERE STATUS IN ('SENT', 'FAILED') AND GENERATED_AT < ? AND ROWNUM <= ?""");
     }
 }
