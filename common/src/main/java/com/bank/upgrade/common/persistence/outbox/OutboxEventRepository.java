@@ -24,6 +24,13 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
         """)
     List<OutboxEvent> lockNextBatch(@Param("limit") int limit);
 
+    /** Events not yet published (an index range scan on STATUS, ID). */
+    long countByStatus(String status);
+
+    /** When the oldest unpublished event was written, or null when none is waiting. */
+    @Query("select e.createdAt from OutboxEvent e where e.id = (select min(x.id) from OutboxEvent x where x.status = 'NEW')")
+    Instant findOldestNewCreatedAt();
+
     @Modifying
     @Query("delete from OutboxEvent e where e.status = 'PUBLISHED' and e.publishedAt < :before")
     int deletePublishedBefore(@Param("before") Instant before);

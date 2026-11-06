@@ -30,7 +30,7 @@ $KC update "realms/$REALM/default-default-client-scopes/$API_SCOPE" $R -n
 
 # --- API scopes a service may ask for (they appear in the token's "scope" claim) ----------------------------
 declare -A SCOPE_ID
-for s in upgrade.read upgrade.admin audit.read notification.resend staging.read; do
+for s in upgrade.read upgrade.admin audit.read notification.resend staging.read metrics.read; do
   SCOPE_ID[$s]=$($KC create client-scopes $R -i -s name=$s -s protocol=openid-connect \
     -s 'attributes."include.in.token.scope"=true' -s 'attributes."display.on.consent.screen"=false')
 done
@@ -67,5 +67,6 @@ service_client() {  # client id, allowed scopes...
 service_client account-upgrade-service staging.read   # reads a loaded file's accounts from ingestion
 service_client local-auditor audit.read               # for trying the audit API with curl
 service_client perf-runner upgrade.admin              # perf/run.sh presses "run now" for the load and the upgrade
+service_client prometheus metrics.read                # the local Prometheus reads /actuator/prometheus
 
 echo "Realm $REALM ready: users olivia.ops, victor.view, sam.support, ada.audit (password local-pw)"

@@ -1,0 +1,38 @@
+# Local Prometheus. Scrapes every service running on this machine (IntelliJ or java -jar) every 5 seconds.
+# /actuator/prometheus needs a token with scope metrics.read: Prometheus gets one itself from Keycloak as the
+# "prometheus" client (client credentials) and renews it before it expires. Tokens name http://localhost:8180 as
+# issuer even when fetched through keycloak:8080 (KC_HOSTNAME in docker-compose), so the services accept them.
+# A service that is not running shows as down (Status > Targets); that is expected for the extra upgrade copies.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: services
+    metrics_path: /actuator/prometheus
+    oauth2:
+      client_id: prometheus
+      client_secret: local-secret
+      token_url: http://keycloak:8080/realms/account-upgrade/protocol/openid-connect/token
+      scopes: [metrics.read]
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels: {service: api-gateway}
+      - targets: ["host.docker.internal:8081"]
+        labels: {service: file-ingestion-service}
+      - targets: ["host.docker.internal:8082", "host.docker.internal:8092", "host.docker.internal:8102"]
+        labels: {service: account-upgrade-service}   # the main copy and the two "Extra upgrade copies"
+      - targets: ["host.docker.internal:8083"]
+        labels: {service: communication-service}
+      - targets: ["host.docker.internal:8085"]
+        labels: {service: audit-service}
+    relabel_configs:
+      # Show instances as localhost:<port>, the address you would open yourself
+      - source_labels: [__address__]
+        regex: '.*:(\d+)'
+        target_label: instance
+        replacement: 'localhost:$1'
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

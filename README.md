@@ -16,7 +16,7 @@ Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 ## Run locally
 
 ```bash
-docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak, Redis
+docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak, Redis, Prometheus, Grafana
 mvn clean verify          # build and test (tests never connect to this Kafka; see the surefire setting in each service pom)
 SPRING_PROFILES_ACTIVE=local mvn -pl file-ingestion-service spring-boot:run
 ```
@@ -25,7 +25,7 @@ Run the services with the `local` profile. It holds the local database and SFTP 
 changing host key, and uses Keycloak from docker-compose as the identity provider. Without it a service has no
 passwords and verifies the SFTP host key, which is what every real environment should do.
 
-Mailpit UI: http://localhost:8025 · Kafka UI: http://localhost:8070 · SFTP: localhost:2222 · Oracle: localhost:1521/FREEPDB1 · Keycloak: http://localhost:8180
+Mailpit UI: http://localhost:8025 · Kafka UI: http://localhost:8070 · SFTP: localhost:2222 · Oracle: localhost:1521/FREEPDB1 · Keycloak: http://localhost:8180 · Grafana: http://localhost:3000 · Prometheus: http://localhost:9090
 Schedules run in `bank.time-zone` (env `BANK_TIME_ZONE`, default `Asia/Kolkata`), never in the server's zone.
 Run Maven with JDK 21 (BlockHound does not work on newer JDKs yet).
 
@@ -257,6 +257,54 @@ Things a production system would need that this project leaves out on purpose:
   per-customer values, and rendering when needed, would be about ten times smaller.
 - **Audit archiving.** The audit trail grows forever; production would move old months to cheap storage.
 - **The real core-banking adapter**, the business's upgrade rules and letter wording, and the Excel layout.
+
+## Monitoring
+
+Every service publishes its metrics at `/actuator/prometheus`. The local Prometheus (http://localhost:9090) scrapes
+the services running on this machine every 5 seconds, and Grafana (http://localhost:3000, no sign-in needed to look;
+`admin` / `admin` to edit) opens on the **Account upgrade** dashboard.
+
+**Who may read metrics.** `/actuator/prometheus` needs a token with scope `metrics.read`, which only Keycloak's
+`prometheus` client gets; a person's token, even an ops admin's, is refused. Prometheus fetches and renews that token
+itself (client credentials, `oauth2` in `infra/monitoring/prometheus.yml`). A Keycloak started before this client
+existed does not have it: recreate it once with `docker compose up -d --force-recreate keycloak keycloak-setup`
+(Prometheus > Status > Targets shows 401 errors until then).
+
+**What the dashboard shows**, top to bottom:
+
+| Row | Panels |
+|---|---|
+| The upgrade run | upgraded / failed / deferred, lease takeovers, copies working; core calls per second by copy with the shared limit as a dashed line; core call time (median, 95th percentile); time waiting for the shared limit; requests each copy holds; finished requests by result |
+| Messaging | events published per topic; outbox events waiting and the age of the oldest; Kafka consumer lag per service and topic; events handled per second |
+| Load and email | rows read from the Excel file per second; emails per second by result; events parked on a dead-letter topic |
+| Services | CPU of the whole machine and each instance; heap; database connections in use; API requests |
+
+**The metrics added for this project** (besides Spring's own: JVM, HTTP, Hikari, Spring Batch):
+
+| Metric | Where | Meaning |
+|---|---|---|
+| `upgrade.core.call` | upgrade | one per core-system try, by `outcome` (ok, refused, unavailable, error), with a histogram |
+| `upgrade.core.limit.wait` | upgrade | time a call waited for the shared per-second limit |
+| `upgrade.requests` | upgrade | finished requests by `result` (upgraded, failed, deferred, error, lost, skipped), counted after commit |
+| `upgrade.leases.taken.over` | upgrade | requests taken over from a copy whose lease ran out |
+| `upgrade.requests.held`, `upgrade.run.active` | upgrade | what this copy holds right now; 1 while it works on a run |
+| `bank.outbox.published`, `bank.outbox.waiting`, `bank.outbox.oldest.age` | every service with an outbox | events sent per topic; events not yet sent and how long the oldest has waited (checked every 5 s) |
+| `bank.events.consumed`, `bank.events.handling` | every consumer | events by `topic` and `result` (processed, duplicate, dead-lettered); time per transaction |
+| `kafka.consumer.*`, `kafka.producer.*` | every service | the Kafka clients' own metrics, among them `records.lag` per partition |
+| `mail.letters`, `mail.round` | communication | emails by `result` (sent, failed, retry); time per sending round |
+
+Every metric carries an `application` tag; copies of a service are told apart by Prometheus's `instance` label
+(`localhost:8082`, `localhost:8092`, ...).
+
+**Changing the dashboard.** It is the file `infra/monitoring/grafana/dashboards/account-upgrade.json`, loaded at
+start and re-read every 10 seconds; edits in the Grafana UI are not kept. Edit it in Grafana, use *Export > Save to
+file*, and replace the file.
+
+**On this laptop.** Locally everything shares one machine, and an 8 GB machine is full with Oracle, Kafka, Keycloak,
+six JVMs, Prometheus, Grafana and a browser: in a run with three upgrade copies the CPU panel sat near 100% and macOS
+was swapping, and 20,000 accounts took 648 s from file to audit trail, against 176 s for the same run without
+monitoring. For performance numbers, close
+the dashboard or stop Grafana (`docker compose stop grafana`); Prometheus alone is light.
 
 ## Performance tests (local only)
 

@@ -17,6 +17,8 @@ public final class ApiAccessRules {
 
     public static void apply(AuthorizeExchangeSpec a) {
         a.pathMatchers("/actuator/health/**", "/actuator/info").permitAll()
+            // metrics: only the monitoring system's own client, never a person
+            .pathMatchers(HttpMethod.GET, "/actuator/prometheus").hasAuthority(SCOPE_METRICS_READ)
 
             // manual re-run, retry
             .pathMatchers(HttpMethod.POST, "/api/jobs/**").hasAnyAuthority(OPS_ADMIN, SCOPE_UPGRADE_ADMIN)
@@ -40,7 +42,7 @@ public final class ApiAccessRules {
             .pathMatchers(HttpMethod.GET, "/internal/files/*/accounts").hasAuthority(SCOPE_STAGING_READ)
             .pathMatchers("/internal/**").denyAll()
 
-            // other paths (for example /actuator/prometheus) need any valid token
+            // other paths need any valid token
             .anyExchange().authenticated();
     }
 }

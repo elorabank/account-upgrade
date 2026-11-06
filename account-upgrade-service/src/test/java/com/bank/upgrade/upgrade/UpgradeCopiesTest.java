@@ -14,6 +14,7 @@ import com.bank.upgrade.upgrade.gateway.CoreCallLimiter;
 import com.bank.upgrade.upgrade.gateway.RedisCoreCallLimiter;
 import com.bank.upgrade.upgrade.gateway.UpgradeCommand;
 import com.bank.upgrade.upgrade.run.UpgradeRunner;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -100,11 +101,21 @@ class UpgradeCopiesTest {
         core.calls.clear();
         core.callTimes.clear();
         core.firstCallAt.clear();
+        meters.clear();
         core.latency = Duration.ofMillis(50);
     }
 
+    /** Each copy's metrics, as each process would have its own. */
+    final Map<String, SimpleMeterRegistry> meters = new ConcurrentHashMap<>();
+
     private UpgradeRunner copy(String name, CoreCallLimiter limiter) {
-        return new UpgradeRunner(requests, core, limiter, outbox, properties, transactionManager, jdbc, Clock.systemUTC(), name);
+        var registry = meters.computeIfAbsent(name, n -> new SimpleMeterRegistry());
+        return new UpgradeRunner(requests, core, limiter, outbox, properties, transactionManager, jdbc, Clock.systemUTC(), registry, name);
+    }
+
+    private double count(String copy, String name, String... tags) {
+        var counter = meters.get(copy).find(name).tags(tags).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     private void queue(String prefix, int count) {
@@ -151,6 +162,11 @@ class UpgradeCopiesTest {
         assertThat(requests.countByStatusAndBusinessDate(UpgradeRequest.UPGRADED, DAY)).isEqualTo(300);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM UPGRADE_REQUEST WHERE CLAIMED_BY IS NOT NULL", Integer.class))
             .as("no claims left behind").isZero();
+        // Each copy's metrics add up to the whole run
+        assertThat(List.of("copy-A", "copy-B", "copy-C").stream().mapToDouble(c -> count(c, "upgrade.requests", "result", "upgraded")).sum())
+            .isEqualTo(300);
+        assertThat(meters.get("copy-A").get("upgrade.requests.held").gauge().value()).isZero();
+        assertThat(meters.get("copy-A").get("upgrade.core.call").tags("outcome", "ok").timer().count()).isPositive();
     }
 
     @Test
@@ -177,6 +193,7 @@ class UpgradeCopiesTest {
             }
         });
         assertThat(requests.countByStatusAndBusinessDate(UpgradeRequest.UPGRADED, DAY)).isEqualTo(20);
+        assertThat(count("copy-A", "upgrade.leases.taken.over")).isEqualTo(20);
     }
 
     @Test

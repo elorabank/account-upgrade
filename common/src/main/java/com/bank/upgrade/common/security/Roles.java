@@ -14,6 +14,8 @@ public final class Roles {
     public static final String SCOPE_NOTIFICATION_RESEND = "SCOPE_notification.resend";
     /** Service-to-service only: the upgrade service reading a loaded file's accounts from the ingestion service. */
     public static final String SCOPE_STAGING_READ = "SCOPE_staging.read";
+    /** Prometheus reading /actuator/prometheus; nothing else. */
+    public static final String SCOPE_METRICS_READ = "SCOPE_metrics.read";
 
     private Roles() {}
 }

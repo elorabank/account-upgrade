@@ -157,6 +157,22 @@ class GatewaySecurityTest {
     }
 
     @Test
+    void onlyTheMetricsScopeReadsMetrics() {
+        String person = JWT.user("AU_OPS_ADMIN");
+        String otherService = JWT.service("perf-runner", "upgrade.admin");
+        web().get().uri("/actuator/prometheus").headers(h -> h.setBearerAuth(person)).exchange().expectStatus().isForbidden();
+        web().get().uri("/actuator/prometheus").headers(h -> h.setBearerAuth(otherService)).exchange().expectStatus().isForbidden();
+        // A browser session never reads metrics either
+        ClientRegistration login = registrations.findByRegistrationId("login").block();
+        web().mutateWith(mockOAuth2Login().clientRegistration(login))
+            .get().uri("/actuator/prometheus").exchange().expectStatus().isForbidden();
+
+        String prometheus = JWT.service("prometheus", "metrics.read");
+        web().get().uri("/actuator/prometheus").headers(h -> h.setBearerAuth(prometheus)).exchange()
+            .expectStatus().value(status -> assertThat(status).as("let through by security").isNotIn(401, 403));
+    }
+
+    @Test
     void postFromABrowserSessionNeedsACsrfToken() {
         ClientRegistration login = registrations.findByRegistrationId("login").block();
         web().mutateWith(mockOAuth2Login().clientRegistration(login))

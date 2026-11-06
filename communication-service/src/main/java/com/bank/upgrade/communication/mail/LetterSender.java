@@ -8,6 +8,9 @@ import com.bank.upgrade.common.messaging.OutboxService;
 import com.bank.upgrade.communication.config.CommunicationProperties;
 import com.bank.upgrade.communication.domain.WelcomeLetter;
 import com.bank.upgrade.communication.domain.WelcomeLetterRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.mail.MessagingException;
 import jakarta.mail.SendFailedException;
 import jakarta.mail.internet.MimeMessage;
@@ -41,6 +44,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * A mail server that is down or slow is retried with growing waits up to {@code maxAttempts}; an address the server
  * rejects fails at once. If the service stops after the server accepted an email but before the transaction
  * commits, that email is sent again later: delivery is at least once, never lost.
+ * <p>
+ * Metrics: {@code mail.letters} by result (sent, failed, retry), counted once the round has committed, and
+ * {@code mail.round}, the time of each round that had letters to send.
  */
 public class LetterSender {
 
@@ -52,20 +58,29 @@ public class LetterSender {
     private final CommunicationProperties properties;
     private final TransactionTemplate tx;
     private final Clock clock;
+    private final MeterRegistry meters;
+    private final Timer round;
 
     public LetterSender(WelcomeLetterRepository letters, JavaMailSender mail, OutboxService outbox,
-            CommunicationProperties properties, PlatformTransactionManager transactionManager, Clock clock) {
+            CommunicationProperties properties, PlatformTransactionManager transactionManager, Clock clock,
+            MeterRegistry meters) {
         this.letters = letters;
         this.mail = mail;
         this.outbox = outbox;
         this.properties = properties;
         this.tx = new TransactionTemplate(transactionManager);
         this.clock = clock;
+        this.meters = meters;
+        this.round = Timer.builder("mail.round").description("One round: lock due letters, send them, record the results")
+            .register(meters);
     }
 
     /** One round. Returns how many letters were tried. */
     public int sendDue() {
+        long started = System.nanoTime();
+        Map<String, Integer> results = new HashMap<>();
         Integer tried = tx.execute(status -> {
+            results.clear();
             var due = letters.lockDue(clock.instant(), properties.batchSize());
             if (due.isEmpty()) {
                 return 0;
@@ -74,11 +89,16 @@ public class LetterSender {
             for (WelcomeLetter letter : due) {
                 try (var scope = CorrelationId.open(letter.getCorrelationId())) {
                     letter.setAttempts(letter.getAttempts() + 1);
-                    record(letter, problems.get(letter));
+                    results.merge(record(letter, problems.get(letter)), 1, Integer::sum);
                 }
             }
             return due.size();
         });
+        if (tried != null && tried > 0) {
+            round.record(System.nanoTime() - started, java.util.concurrent.TimeUnit.NANOSECONDS);
+            results.forEach((result, n) -> Counter.builder("mail.letters").description("Welcome emails tried, by result")
+                .tag("result", result).register(meters).increment(n));
+        }
         return tried == null ? 0 : tried;
     }
 
@@ -139,15 +159,20 @@ public class LetterSender {
         return shares;
     }
 
-    private void record(WelcomeLetter letter, Exception problem) {
+    /** Saves one letter's result; returns it for the metrics. */
+    private String record(WelcomeLetter letter, Exception problem) {
         if (problem == null) {
             sent(letter);
+            return "sent";
         } else if (permanent(problem)) {
             failed(letter, "The mail server refused the message: " + problem.getMessage());
+            return "failed";
         } else if (letter.getAttempts() >= properties.maxAttempts()) {
             failed(letter, "Gave up after " + letter.getAttempts() + " attempts. Last error: " + problem.getMessage());
+            return "failed";
         } else {
             retryLater(letter, problem);
+            return "retry";
         }
     }
 

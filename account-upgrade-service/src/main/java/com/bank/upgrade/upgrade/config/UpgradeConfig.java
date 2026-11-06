@@ -19,6 +19,7 @@ import com.bank.upgrade.upgrade.run.UpgradeScheduler;
 import com.bank.upgrade.upgrade.staging.IngestionStagingClient;
 import com.bank.upgrade.upgrade.staging.StagingSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -93,8 +94,8 @@ public class UpgradeConfig {
     @Bean
     UpgradeRunner upgradeRunner(UpgradeRequestRepository requests, AccountUpgradeGateway gateway, CoreCallLimiter limiter,
             OutboxService outbox, UpgradeProperties properties, PlatformTransactionManager transactionManager,
-            JdbcTemplate jdbc, Clock clock) {
-        return new UpgradeRunner(requests, gateway, limiter, outbox, properties, transactionManager, jdbc, clock);
+            JdbcTemplate jdbc, Clock clock, MeterRegistry meters) {
+        return new UpgradeRunner(requests, gateway, limiter, outbox, properties, transactionManager, jdbc, clock, meters);
     }
 
     /** Every copy hears "run now" (its own consumer group) and joins the run in the background. */
