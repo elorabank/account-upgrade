@@ -1,6 +1,5 @@
 package com.bank.upgrade.gateway;
 
-import com.bank.upgrade.test.RedisTestConfig;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockOAuth2Login;
@@ -22,17 +21,20 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ReactiveClientRegistrationRepository;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
-@Import(RedisTestConfig.class)
+// Sessions in memory instead of Redis: tests use no Redis
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.MOCK,
     properties = {
+        "spring.autoconfigure.exclude="
+            + "org.springframework.boot.autoconfigure.session.SessionAutoConfiguration,"
+            + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
+            + "org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration",
         "spring.security.oauth2.resourceserver.jwt.issuer-uri=" + TestJwt.ISSUER,
         "bank.idp.issuer-uri=https://idp.test/realms/account-upgrade",
         "IDP_CLIENT_ID=gateway-test-client"

@@ -52,6 +52,24 @@ public final class TestJwt {
         }
     }
 
+    /** One instance for the whole test JVM, used by {@link ApiTest}. */
+    public static TestJwt shared() {
+        return Shared.INSTANCE;
+    }
+
+    private static final class Shared {
+        static final TestJwt INSTANCE = new TestJwt();
+    }
+
+    /** The key tokens are signed with, for a decoder that needs no HTTP call. */
+    public java.security.interfaces.RSAPublicKey publicKey() {
+        try {
+            return signingKey.toRSAPublicKey();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     public String jwkSetUri() {
         return "http://127.0.0.1:" + jwks.getAddress().getPort() + "/jwks";
     }

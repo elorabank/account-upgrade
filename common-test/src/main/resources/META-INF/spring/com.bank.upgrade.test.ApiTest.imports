@@ -1,0 +1,6 @@
+# What @ApiTest switches on besides @WebFluxTest's own web layer: Spring Security, the services' shared security chain
+# and access rules, correlation ids, and BlockingJpa (on the no-op transaction manager). No database, Kafka or Redis.
+org.springframework.boot.autoconfigure.security.reactive.ReactiveSecurityAutoConfiguration
+com.bank.upgrade.common.autoconfigure.ResourceServerSecurityAutoConfiguration
+com.bank.upgrade.common.autoconfigure.CorrelationAutoConfiguration
+com.bank.upgrade.common.autoconfigure.MessagingAutoConfiguration

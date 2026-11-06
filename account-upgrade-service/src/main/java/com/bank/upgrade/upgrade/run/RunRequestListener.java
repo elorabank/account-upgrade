@@ -50,18 +50,21 @@ public class RunRequestListener implements SmartLifecycle {
             .commitInterval(Duration.ofSeconds(1));
         running = Flux.defer(() -> KafkaReceiver.create(options).receiveAutoAck())
             .concatMap(batch -> batch)
-            .doOnNext(record -> {
-                try {
-                    var event = mapper.readValue(record.value(), EventEnvelope.class);
-                    String runId = event.dataAs(mapper, UpgradeRunRequested.class).runId();
-                    log.info("Run requested: {}", runId);
-                    onRunRequested.accept(runId);
-                } catch (Exception e) {
-                    log.warn("Ignoring an unreadable run request: {}", e.toString());
-                }
-            })
+            .doOnNext(record -> onMessage(record.value()))
             .retryWhen(Retry.backoff(Long.MAX_VALUE, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(30)))
             .subscribe();
+    }
+
+    /** One "run now" message: start (or join) that run. Anything unreadable is logged and skipped. */
+    void onMessage(String value) {
+        try {
+            var event = mapper.readValue(value, EventEnvelope.class);
+            String runId = event.dataAs(mapper, UpgradeRunRequested.class).runId();
+            log.info("Run requested: {}", runId);
+            onRunRequested.accept(runId);
+        } catch (Exception e) {
+            log.warn("Ignoring an unreadable run request: {}", e.toString());
+        }
     }
 
     @Override

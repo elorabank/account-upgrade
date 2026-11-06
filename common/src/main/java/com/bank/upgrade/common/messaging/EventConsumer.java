@@ -119,7 +119,7 @@ public class EventConsumer implements SmartLifecycle {
     }
 
     /** A batch in one transaction; if that fails, the same records one by one with retries and dead-lettering. */
-    private Mono<Void> processBatch(List<ReceiverRecord<String, String>> records) {
+    Mono<Void> processBatch(List<ReceiverRecord<String, String>> records) {
         if (records.size() == 1) {
             return process(records.get(0));
         }
