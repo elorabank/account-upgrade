@@ -16,7 +16,7 @@ Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 ## Run locally
 
 ```bash
-docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak
+docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak, Redis
 mvn clean verify          # build and test (tests never connect to this Kafka; see the surefire setting in each service pom)
 SPRING_PROFILES_ACTIVE=local mvn -pl file-ingestion-service spring-boot:run
 ```
@@ -54,7 +54,14 @@ call without a rule is refused. `/internal/**` is for services only (a scope, ne
 route it: today that is `GET /internal/files/{id}/accounts`, scope `staging.read`.
 
 The gateway signs people in (authorization code + PKCE), keeps the session, and passes the user's access token to the
-services. Signing out ends the session at the identity provider too. Postman and other systems can send
+services. Signing out ends the session at the identity provider too.
+
+**Sessions in Redis.** The gateway keeps login sessions (who is signed in, their tokens, a login in progress) in Redis
+through Spring Session, not in its own memory. Any gateway copy can serve any signed-in person, and a restart or
+redeploy signs nobody out. Sessions expire after 30 minutes without activity (`spring.session.timeout`). They hold
+access tokens, so Redis must be private and password protected, with TLS in the cloud: `REDIS_HOST`, `REDIS_PORT`,
+`REDIS_PASSWORD`, `REDIS_SSL`. Locally the `local` profile uses the compose Redis (password `local-redis-pw`). The
+gateway connects to Redis at startup, so it does not start without it. Postman and other systems can send
 `Authorization: Bearer <token>` straight to the gateway.
 
 **Keycloak locally.** `docker compose up -d` starts Keycloak on http://localhost:8180 (admin console: admin / admin)

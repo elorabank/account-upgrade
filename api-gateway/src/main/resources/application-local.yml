@@ -8,3 +8,7 @@ spring:
           login:
             client-id: api-gateway
             client-secret: local-secret
+  data:
+    redis:
+      host: localhost
+      password: local-redis-pw
