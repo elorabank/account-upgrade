@@ -7,8 +7,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Repository secret; without it the Sonar step is skipped (see README "CI checks")
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # Sonar compares with earlier commits (new code, blame)
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -17,4 +22,13 @@ jobs:
       - name: Build and test
         # Unit and API tests only: no Docker, no database (real-database checks are local, see README "Tests")
         run: mvn -B verify
-      # Add later: Sonar scan and OWASP dependency-check (org.owasp:dependency-check-maven).
+      - name: Keep the coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: "**/target/site/jacoco/"
+          if-no-files-found: ignore
+      - name: SonarCloud analysis
+        if: env.SONAR_TOKEN != ''
+        run: mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
