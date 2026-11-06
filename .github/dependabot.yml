@@ -1,3 +1,7 @@
+# PAUSED: every ecosystem below has open-pull-requests-limit: 0, which stops version-update pull requests while
+# keeping the rules. To resume, set the limits back (5 for maven and npm; remove the line for the other two).
+# Security updates, if switched on in Settings > Advanced Security, are not affected by this limit.
+#
 # Dependabot opens pull requests for newer versions; CI checks each one. Grouped, so one week's updates of a kind come
 # as one pull request instead of many. Security updates (for known vulnerabilities) also need "Dependabot alerts"
 # switched on in the repository's Settings > Advanced Security.
@@ -22,7 +26,7 @@ updates:
     groups:
       maven:
         patterns: ["*"]
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0   # paused (was 5)
 
   - package-ecosystem: npm
     directory: /ops-ui
@@ -37,12 +41,13 @@ updates:
         patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
       npm:
         patterns: ["*"]
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0   # paused (was 5)
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0   # paused
     groups:
       actions:
         patterns: ["*"]
@@ -52,6 +57,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    open-pull-requests-limit: 0   # paused
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
