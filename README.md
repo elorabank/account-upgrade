@@ -3,7 +3,8 @@
 Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 
 Design: [high-level design](docs/hld.md) (architecture, flows, data, security, failure handling, risks) and the
-[decision records](docs/adr/README.md) (why it is built this way).
+[decision records](docs/adr/README.md) (why it is built this way). The design also exists as a web page,
+`docs/hld.html`, generated from the Markdown: after changing `docs/hld.md`, run `python3 docs/build-hld-html.py`.
 
 | Module | Port | Purpose |
 |---|---|---|
@@ -11,8 +12,8 @@ Design: [high-level design](docs/hld.md) (architecture, flows, data, security, f
 | common-test | - | Test-only helpers: signed test tokens, `@ApiTest`, a transaction manager without a database |
 | file-ingestion-service | 8081 | SFTP fetch, Excel load |
 | account-upgrade-service | 8082 | Daily upgrade job |
-| communication-service | 8083 | Welcome letter HTML, sent as the email body |
-| audit-service | 8085 | Audit trail of every business step and user action |
+| communication-service | 8083 | Welcome letters and emails |
+| audit-service | 8085 | Audit trail of every business step and user action; old months to archive files |
 | api-gateway | 8080 | Entry point, Okta login, serves the ops console |
 | ops-ui | - | The ops console (React + TypeScript), built by Maven into the gateway |
 
@@ -48,7 +49,7 @@ in CI (`.github/workflows/ci.yml`, on every pull request and push to `main`).
 
 | Kind | What it covers | How |
 |---|---|---|
-| Unit tests | the upgrade run (calls, retries, outcomes, events, leases, takeovers, metrics), planning, the rate limit, the Excel reader and row rules, the load run (which files are loaded, skipped, failed or resumed, where they are moved), letters and email sending, the outbox poller and sender, the Kafka consumer (de-duplication, retries, dead letters, correlation ids), the audit recorder | JUnit and Mockito; repositories, Kafka, SFTP, the mail server and the core system are mocks or small fakes |
+| Unit tests | the upgrade run (calls, retries, outcomes, events, leases, takeovers, metrics), planning, the rate limit, the Excel reader and row rules, the load run (which files are loaded, skipped, failed or resumed, where they are moved), letters and email sending, the outbox poller and sender, the Kafka consumer (de-duplication, retries, dead letters, correlation ids), the audit recorder, the clean-up (batches, partition drops), the audit archive (files, checks, takeovers) | JUnit and Mockito; repositories, Kafka, SFTP, the mail server and the core system are mocks or small fakes |
 | API tests | every REST endpoint: status codes, JSON, paging, audit events for user actions | `@ApiTest` (common-test): the controllers and the real security chain with signed test tokens; everything behind the controllers is mocked |
 | Access rules | every endpoint against every role and scope, bad tokens | `AccessMatrixTest` (common) |
 
@@ -216,17 +217,17 @@ The core-system call is `AccountUpgradeGateway`. The default (`bank.upgrade.gate
 
 `communication-service` turns every `account.upgraded` event into a welcome email.
 
-1. **Letter.** It takes the highest active `LETTER_TEMPLATE` for the new account type and fills it with Thymeleaf. Values are HTML-escaped, and the account number shows only its last four digits. The result is saved in `WELCOME_LETTER` as `PENDING`. This runs inside the Kafka consumer's transaction, so a slow mail server never holds up the topic. An upgrade gets one letter even if it is announced twice (`UPGRADE_REQUEST_ID` is unique). An account type without a template goes to the dead-letter topic; add the template and replay the event.
-2. **Email.** Every few seconds a sender locks the due `PENDING` letters (`FOR UPDATE SKIP LOCKED`, so several instances never send the same letter), emails each with the letter as the HTML body, and records the result with its event in one transaction: `SENT` and `notification.sent`, or `FAILED` and `notification.failed`. A mail server that is down is retried with growing waits (`retry-delay` 1m, then 2m, 4m, 8m) up to `max-attempts` (5); an address the server rejects fails at once. If the service stops after the server accepted an email but before the commit, that email is sent again: delivery is at least once.
+1. **Letter.** It takes the highest active `LETTER_TEMPLATE` for the new account type and saves a `PENDING` row in `WELCOME_LETTER` with that template version (`TEMPLATE_ID`), the filled-in subject and the few values that fill the body: customer name, old and new type, business date (about 35 bytes instead of about 1.8 KB of HTML). The first letter from a template version is built in full once, so a broken template is caught before any letter points at it. This runs inside the Kafka consumer's transaction, so a slow mail server never holds up the topic. An upgrade gets one letter even if it is announced twice (`UPGRADE_REQUEST_ID` is unique). An account type without a template goes to the dead-letter topic; add the template and replay the event.
+2. **Email.** Every few seconds a sender locks the due `PENDING` letters (`FOR UPDATE SKIP LOCKED`, so several instances never send the same letter), builds each email from its template version and values with Thymeleaf (values HTML-escaped, the account number shown by its last four digits only), and records the result with its event in one transaction: `SENT` and `notification.sent`, or `FAILED` and `notification.failed`. A mail server that is down is retried with growing waits (`retry-delay` 1m, then 2m, 4m, 8m) up to `max-attempts` (5); an address the server rejects, or a letter that cannot be built, fails at once. If the service stops after the server accepted an email but before the commit, that email is sent again: delivery is at least once.
 3. **Resend.** `POST /api/notifications/{id}/resend` (ops admin or support) puts a letter back to `PENDING` with fresh attempts and publishes an `audit.user-action` event naming who asked.
 
-Templates are seeded by changeset `com-003-welcome-templates` (`SAVINGS_PLUS`, `CURRENT_PLUS`). To change a letter, insert a new `VERSION_NO` with `ACTIVE = 1`; letters already sent keep their own copy. Locally the emails go to Mailpit (http://localhost:8025). Elsewhere set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `MAIL_FROM` (STARTTLS is required). A mail outage does not mark the service DOWN in `/actuator/health`; letters wait and are retried.
+Templates are seeded by changeset `com-003-welcome-templates` (`SAVINGS_PLUS`, `CURRENT_PLUS`). A template version never changes once written (a trigger refuses it), because letters point at it and a resent email must say what the first one said. To change a letter, insert a new `VERSION_NO` with `ACTIVE = 1` (turning `ACTIVE` on and off is allowed). Letters written before letters became compact keep their full HTML in `HTML_BODY` and are sent from it. Locally the emails go to Mailpit (http://localhost:8025). Elsewhere set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `MAIL_FROM` (STARTTLS is required). A mail outage does not mark the service DOWN in `/actuator/health`; letters wait and are retried.
 
 ## Audit
 
 `audit-service` reads every business topic (`account.file-loaded`, `account.upgraded`, `account.upgrade-rejected`, `account.upgrade-failed`, `notification.sent`, `notification.failed`, `audit.user-action`) and writes one row per event to `AUDIT_EVENT`: who (`ACTOR`), what (`EVENT_TYPE` and a short `SUMMARY`), when (`OCCURRED_AT`), which account, and which business action (`CORRELATION_ID`).
 
-The table is insert-only (a trigger blocks UPDATE and DELETE) and kept forever, so it holds no customer names or emails. Summaries are built from codes and counts, for example `Upgraded SAVINGS -> SAVINGS_PLUS for 2026-11-10`, and anything that looks like an email address is replaced with `[email removed]`. The event data is read as JSON, so a field a producer adds later does not break the audit trail. Each event is recorded once, even when delivered again.
+The table is insert-only (a trigger blocks UPDATE and DELETE) and the trail is kept forever, so it holds no customer names or emails. The last 400 days stay in the table; older months move to archive files (below). Summaries are built from codes and counts, for example `Upgraded SAVINGS -> SAVINGS_PLUS for 2026-11-10`, and anything that looks like an email address is replaced with `[email removed]`. The event data is read as JSON, so a field a producer adds later does not break the audit trail. Each event is recorded once, even when delivered again.
 
 `GET /api/audit/events` searches it, newest first (ops admin, auditor, or scope `audit.read`). The filters are all optional and combine:
 
@@ -245,6 +246,30 @@ TOKEN=$(curl -s -X POST http://localhost:8180/realms/account-upgrade/protocol/op
   -d client_id=local-auditor -d client_secret=local-secret -d scope=audit.read | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
 curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8085/api/audit/events?eventType=FileLoaded" | python3 -m json.tool
 ```
+
+### Audit archive
+
+Once a day at 05:00 (`bank.audit.archive.cron`) the audit service looks for months of `AUDIT_EVENT` that ended more
+than 400 days ago (`bank.audit.archive.keep`). Each one is written to one file, `audit-events-2025-01.jsonl.gz`:
+gzip-compressed JSON, one event per line, in id order, with every column. The file is stored in
+`bank.audit.archive.dir` (env `AUDIT_ARCHIVE_DIR`, default `./audit-archive`; a durable mounted volume in real
+environments), then read back from there and checked: every line parses, the count matches the month's rows, the
+SHA-256 matches. Only then is the month's partition dropped. `AUDIT_ARCHIVE` records each month: file, number of
+events, SHA-256, first and last id, and its state (`WRITING`, `ARCHIVED`, `DROPPED`).
+
+`GET /api/audit/archives` lists them (same access as the search). To check or read a file:
+
+```bash
+shasum -a 256 audit-events-2025-01.jsonl.gz            # compare with the sha256 the API shows
+gunzip -c audit-events-2025-01.jsonl.gz | jq 'select(.accountNo == "AC261110000042")'
+```
+
+Two copies of the service never write the same month (the `AUDIT_ARCHIVE` row is the claim; one left `WRITING` for
+an hour, by a copy that stopped, is taken over). A failure at any step leaves the rows in the table for the next run.
+If rows of an archived month change (an event from long ago replayed), nothing is dropped and the month is reported
+(`audit.archive.months` with outcome `changed`, and the `AuditArchiveProblem` alert); to archive it again with those
+rows, delete its `AUDIT_ARCHIVE` row. Switch it off with `bank.audit.archive.enabled=false`. Without Oracle's
+partitioning option there are no month partitions and the whole trail stays in the table.
 
 ## Ops console
 
@@ -297,8 +322,10 @@ repository's Settings > Advanced Security.
 ## Retention (deleting old data)
 
 Every service with a database deletes what it no longer needs once a day, at 05:30 in `bank.time-zone`, after the
-nightly load, upgrade and emails (`RetentionRunner` in common). It deletes in batches of 10,000 rows, each in its own
-short transaction, so a big clean-up never holds long locks or fills Oracle's undo space.
+nightly load, upgrade and emails (`RetentionRunner` in common). Where a table is partitioned (below), it first drops
+the partitions whose rows are all old enough and none still needed: a month of a million rows goes in a moment, with
+no undo. Then it deletes the old rows that are left, in batches of 10,000, each in its own short transaction, so a
+big clean-up never holds long locks or fills Oracle's undo space.
 
 | Rule (`bank.retention.keep.<rule>`) | Service | Deletes | Kept |
 |---|---|---|---|
@@ -309,21 +336,38 @@ short transaction, so a big clean-up never holds long locks or fills Oracle's un
 | `processed-events` | upgrade, communication, audit | the consumers' de-duplication records (a redelivery comes within Kafka's 7 days) | 30 days |
 
 The file list and its rejected rows stay (small, and the console shows them); the outbox cleans itself after 7 days;
-the audit trail is append-only and is not deleted. Change a period with `bank.retention.keep.<rule>` (for example
-`BANK_RETENTION_KEEP_LETTERS=800d`), the time with `bank.retention.cron`, switch it off with
-`bank.retention.enabled=false`. Metric: `bank.retention.deleted` by rule. Every copy of a service runs it; that is safe
+the audit trail is never deleted (old months move to archive files, see Audit). Change a period with
+`bank.retention.keep.<rule>` (for example `BANK_RETENTION_KEEP_LETTERS=800d`), the time with `bank.retention.cron`,
+switch it off with `bank.retention.enabled=false`. Metrics: `bank.retention.deleted` (rows, dropped partitions
+included) and `bank.retention.partitions.dropped`, by rule. Every copy of a service runs it; that is safe
 (a row is deleted once). The periods are a starting point: how long a bank must keep what is a question for its
 compliance team.
+
+### Partitioning
+
+The four big tables are partitioned by their services' Liquibase changesets, online (the tables stay usable while
+they are converted); Oracle adds each new partition by itself:
+
+| Table | Partitions | Split with it (`LOCAL`) | Dropped when |
+|---|---|---|---|
+| `UPGRADE_REQUEST` | one per month of `BUSINESS_DATE` | account-and-date, status-and-date indexes | the month is past 400 days and no request in it is pending or in progress |
+| `WELCOME_LETTER` | one per month written (`GENERATED_DAY`, the UTC date of `GENERATED_AT`) | status-and-time index | the month is past 400 days and no letter in it is pending |
+| `ACCOUNT_STAGING` | one per file (`FILE_ID`, automatic list) | file-and-row index | the file completed more than 30 days ago |
+| `AUDIT_EVENT` | one per month of `EVENT_DAY` (UTC date of `OCCURRED_AT`) | time index | archived to a file and checked (see Audit) |
+
+The other indexes stay one index over the whole table (`GLOBAL`), because their lookups (by id, account, lease, due
+time) span every month; a drop keeps them usable (`UPDATE GLOBAL INDEXES`). Partitioning is a separately licensed
+option of Oracle Enterprise Edition (included in Oracle Free). Without it the changesets are skipped and marked as
+run, nothing is partitioned, and the clean-up deletes rows as before.
 
 ## Not done (learning project)
 
 Things a production system would need that this project leaves out on purpose:
 
-- **Partitioning** of the big tables by day or month, so old data can be dropped instantly (in a licensed Oracle this
-  is the separately paid Partitioning option).
-- **Stored letter HTML.** Every letter keeps its full HTML (about 2 KB); storing the template version and the few
-  per-customer values, and rendering when needed, would be about ten times smaller.
-- **Audit archiving.** The audit trail grows forever; production would move old months to cheap storage.
+- **Archive files in a cloud bucket.** Audit archives go to a folder; a bucket with write-once retention (for
+  example Google Cloud Storage with a retention lock) would be another `ArchiveStore`.
+- **A restore tool** that loads an archived month back into a table for searching; today a file is read with
+  `gunzip` and `jq`.
 - **The real core-banking adapter**, the business's upgrade rules and letter wording, and the Excel layout.
 
 ## Monitoring
@@ -366,6 +410,8 @@ existed does not have it: recreate it once with `docker compose up -d --force-re
 | `bank.events.consumed`, `bank.events.handling` | every consumer | events by `topic` and `result` (processed, duplicate, dead-lettered); time per transaction |
 | `kafka.consumer.*`, `kafka.producer.*` | every service | the Kafka clients' own metrics, among them `records.lag` per partition |
 | `mail.letters`, `mail.round` | communication | emails by `result` (sent, failed, retry); time per sending round |
+| `bank.retention.deleted`, `bank.retention.partitions.dropped` | every service with a database | rows removed and partitions dropped by the daily clean-up, by `rule` |
+| `audit.archive.months`, `audit.archive.rows` | audit | months handled by `outcome` (archived, busy, changed, failed); events moved to files |
 
 Every metric carries an `application` tag; copies of a service are told apart by Prometheus's `instance` label
 (`localhost:8082`, `localhost:8092`, ...).
@@ -384,6 +430,7 @@ it is over.
 | `CoreSystemUnavailable` | more than 20% of core-system calls fail as unavailable, for 5 minutes | critical |
 | `UpgradeCopyDied` | requests were taken over from a copy whose lease ran out | info |
 | `WelcomeEmailsFailing` | a welcome email failed for good | warning |
+| `AuditArchiveProblem` | the audit archive could not move a month to its file, or the month's rows changed | warning |
 
 With nothing running, `ServiceDown` fires after about a minute and its email arrives a little later: an easy way to
 see the whole path work.

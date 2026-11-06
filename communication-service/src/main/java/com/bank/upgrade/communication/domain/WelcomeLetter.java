@@ -2,11 +2,16 @@ package com.bank.upgrade.communication.domain;
 
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.time.LocalDate;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/** One row per upgraded account: the letter, which is also the email body, and how its delivery went. */
+/**
+ * One row per upgraded account: what the welcome email says and how its delivery went. The email itself is built
+ * when it is sent, from the template version ({@code templateId}) and the values kept here; see
+ * {@link com.bank.upgrade.communication.letter.LetterContent}.
+ */
 @Entity
 @Table(name = "WELCOME_LETTER")
 @Getter
@@ -35,11 +40,25 @@ public class WelcomeLetter {
     @Column(name = "TEMPLATE_ID", nullable = false)
     private Long templateId;
 
+    /** Kept filled in, so the ops console can list letters without building each one. */
     @Column(nullable = false, length = 300)
     private String subject;
 
+    @Column(name = "CUSTOMER_NAME", updatable = false, length = 200)
+    private String customerName;
+
+    @Column(name = "FROM_TYPE", updatable = false, length = 30)
+    private String fromType;
+
+    @Column(name = "TO_TYPE", updatable = false, length = 30)
+    private String toType;
+
+    @Column(name = "BUSINESS_DATE", updatable = false)
+    private LocalDate businessDate;
+
+    /** The finished HTML, only on letters written before letters became compact (changeset com-005); null since. */
     @Lob
-    @Column(name = "HTML_BODY", nullable = false)
+    @Column(name = "HTML_BODY", updatable = false)
     private String htmlBody;
 
     public static final String PENDING = "PENDING";

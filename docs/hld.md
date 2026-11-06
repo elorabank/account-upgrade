@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | As built, November 2026 (`main` after PR #26). A learning project; see Risks and open items. |
+| **Status** | As built, November 2026: `main` after PR #26, plus compact letters, partitioning and the audit archive (ADR-0020 to 0022). A learning project; see Risks and open items. |
 | **Scope** | The nightly upgrade of bank accounts, from the Excel file to the welcome email and the audit trail, and the ops console around it |
 | **Decisions** | The reasons behind this design are in the [decision records](adr/README.md) (ADR-0001 to ADR-0019) |
 | **Details** | How to run, configure and operate each part: [README](../README.md) |
@@ -84,8 +84,8 @@ flowchart TB
 |---|---|---|---|
 | `file-ingestion-service` | `ING_OWNER`: file log, staging rows, rejected rows, Spring Batch records | picks up the file, loads it with Spring Batch, checks each row, announces `account.file-loaded`, streams a file's accounts to the upgrade service | 01:00, one instance at a time (ShedLock, ADR-0009) |
 | `account-upgrade-service` | `UPG_OWNER`: upgrade requests | plans requests from a loaded file (eligible or rejected), runs the upgrade against the core system | planning on each file; the run at 03:00 on every copy (ADR-0010) |
-| `communication-service` | `COM_OWNER`: letter templates, welcome letters | writes a letter for each upgrade, emails due letters, resend | continuously |
-| `audit-service` | `AUD_OWNER`: audit events | records every business event, search API | continuously |
+| `communication-service` | `COM_OWNER`: letter templates, welcome letters | writes a letter for each upgrade (template version and values), builds and emails due letters, resend | continuously |
+| `audit-service` | `AUD_OWNER`: audit events, archived months | records every business event, search API, moves months older than 400 days to archive files | continuously; archive at 05:00 |
 | `api-gateway` | none (sessions in Redis) | signs people in, keeps their session, routes `/api/**` to the services with the person's token, serves the console | continuously |
 | `common` (library) | shared tables in each schema: outbox, processed events | outbox, consumer template, security rules, correlation ids, retention, metrics | — |
 
@@ -101,7 +101,8 @@ All times are in `bank.time-zone` (default `Asia/Kolkata`), never the server's z
 | minutes later | Planning: the upgrade service turns the loaded accounts into upgrade requests |
 | 03:00 | Upgrade run: every copy of the upgrade service joins; core-system calls |
 | as upgrades finish | Letters are written and emailed; every event lands in the audit trail |
-| 05:30 | Retention: every service deletes data older than its rules keep it (ADR-0019) |
+| 05:00 | Audit archive: months that ended more than 400 days ago go to checked files, then leave the table (ADR-0022) |
+| 05:30 | Retention: every service drops old partitions, then deletes the old rows left (ADR-0019, ADR-0021) |
 | any time | Ops console: watch progress, run a job now, retry an upgrade, resend an email |
 
 ### 4.1 Load and planning
@@ -170,9 +171,10 @@ sequenceDiagram
     participant SM as Mail server
     participant AU as audit
     K-->>M: account.upgraded
-    M->>DC: letter PENDING from the newest active template (values escaped, account masked)
+    M->>DC: letter PENDING: newest active template version + the values (name, types, date)
     loop every few seconds
         M->>DC: lock due letters (SKIP LOCKED)
+        M->>M: build each email from its template version (values escaped, account masked)
         M->>SM: send over several connections
         M->>DC: SENT + notification.sent, FAILED + notification.failed, or retry later (1, 2, 4, 8 min)
     end
@@ -235,13 +237,17 @@ example one file) can be followed across services, logs and the audit trail.
 
 Each service owns its schema and creates it with Liquibase; no service reads another's tables (ADR-0003).
 
-| Schema | Main tables | Grows by | Kept (ADR-0019) |
-|---|---|---|---|
-| `ING_OWNER` | `FILE_INGESTION_LOG`, `ACCOUNT_STAGING`, `INGESTION_ERROR`, `BATCH_*` | every row of every file | staging and completed Batch records 30 days; file list and rejected rows kept |
-| `UPG_OWNER` | `UPGRADE_REQUEST` | every account every day | finished requests 400 days; pending never deleted |
-| `COM_OWNER` | `LETTER_TEMPLATE`, `WELCOME_LETTER` (full HTML, about 2 KB each) | every upgraded account | sent and failed letters 400 days |
-| `AUD_OWNER` | `AUDIT_EVENT` (insert-only, no personal data) | every business event | forever (archiving is an open item) |
-| each of the above | `OUTBOX_EVENT`, `PROCESSED_EVENT` | every event sent / handled | outbox 7 days after publishing; processed events 30 days |
+| Schema | Main tables | Grows by | Partitioned by (ADR-0021) | Kept (ADR-0019) |
+|---|---|---|---|---|
+| `ING_OWNER` | `FILE_INGESTION_LOG`, `ACCOUNT_STAGING`, `INGESTION_ERROR`, `BATCH_*` | every row of every file | staging: one partition per file | staging and completed Batch records 30 days; file list and rejected rows kept |
+| `UPG_OWNER` | `UPGRADE_REQUEST` | every account every day | month of business date | finished requests 400 days; pending never deleted |
+| `COM_OWNER` | `LETTER_TEMPLATE` (versions never change), `WELCOME_LETTER` (template version and values, about 35 bytes; ADR-0020) | every upgraded account | month written | sent and failed letters 400 days |
+| `AUD_OWNER` | `AUDIT_EVENT` (insert-only, no personal data), `AUDIT_ARCHIVE` | every business event | month of the event | 400 days in the table, then forever in archive files (ADR-0022) |
+| each of the above | `OUTBOX_EVENT`, `PROCESSED_EVENT` | every event sent / handled | — | outbox 7 days after publishing; processed events 30 days |
+
+The daily clean-up drops a whole partition once all its rows are past the period and none is still needed (a pending
+request or letter keeps its month), then deletes the old rows left. Oracle adds partitions by itself. Without the
+partitioning option (Oracle Standard Edition) the tables stay unpartitioned and the clean-up only deletes rows.
 
 Personal data: names and emails live in staging rows, upgrade requests and letters only, all with retention. Letters
 show only the last four digits of the account number. The audit trail holds codes, counts and masked text (ADR-0015).
@@ -306,6 +312,9 @@ too much for honest numbers (ADR-0016).
 | An address the mail server rejects | that letter FAILED at once |
 | Kafka down | events wait in the outboxes (alert `OutboxFallingBehind`) and are sent when Kafka is back |
 | An event that keeps failing | parked on `<topic>.DLT` (alert `EventDeadLettered`); fix and replay |
+| A letter template that cannot be filled | the event is parked before any letter points at that version; activate a fixed version and replay |
+| An audit archive file that does not read back complete | nothing is dropped; the month stays in the table and is tried again the next day |
+| Rows of an audit month change after it was archived | nothing is dropped; alert `AuditArchiveProblem` for a person to decide |
 | The same event twice | recorded once (processed-event table, unique keys) |
 | A bad row in the file | rejected with its problems; the rest of the file loads |
 | A file that cannot load (not a workbook, a column missing) | marked FAILED, moved to `error` |
@@ -321,12 +330,14 @@ key; emails at least once (a crash after the mail server accepted but before the
 ### 8.4 Observability
 
 - **Metrics:** every service exposes Micrometer metrics to Prometheus, including the pipeline's own (core calls by
-  outcome, limit waits, finished requests, lease takeovers, outbox backlog, events by result, emails, retention).
+  outcome, limit waits, finished requests, lease takeovers, outbox backlog, events by result, emails, retention,
+  partitions dropped, audit months archived).
 - **Dashboard:** "Account upgrade" in Grafana, a file in the repo; sign-in through Keycloak.
-- **Alerts:** seven rules (service down, dead-lettered event, Kafka lag, outbox stuck, core system unavailable,
-  upgrade copy died, emails failing), emailed by Alertmanager (ADR-0016).
+- **Alerts:** eight rules (service down, dead-lettered event, Kafka lag, outbox stuck, core system unavailable,
+  upgrade copy died, emails failing, audit archive problem), emailed by Alertmanager (ADR-0016).
 - **Tracing a business action:** the correlation id in every event, HTTP call, log line and audit row.
-- **Audit trail:** who did what and when, searchable by account, action, type or person (ADR-0015).
+- **Audit trail:** who did what and when, searchable by account, action, type or person (ADR-0015); older months
+  in checked archive files, listed with their SHA-256 (ADR-0022).
 
 ## 9. Technology
 
@@ -338,7 +349,7 @@ key; emails at least once (a crash after the mail server accepted but before the
 | Kafka client | reactor-kafka | 1.3.25 | no longer developed by the Reactor team (Risks) |
 | Batch | Spring Batch | 5.x (with Boot 3.5) | |
 | Persistence | JPA (Hibernate), JDBC, Liquibase | with Boot 3.5 | |
-| Database | Oracle | Free 23 locally | production edition and hosting to decide |
+| Database | Oracle | Free 23 locally | production edition and hosting to decide; partitioning needs Enterprise Edition with the Partitioning option |
 | Messaging | Apache Kafka | 3.9 | |
 | Cache / sessions | Redis | 7.4 | |
 | Identity | Keycloak | 26.4 | Okta or Auth0 possible |
@@ -373,9 +384,9 @@ Prometheus reaches the services (the scope, or a protected management port), and
 | Idempotency of the core system's API not confirmed | double upgrades on retries | confirm with the core team |
 | Fail-open rate limit (ADR-0012) | a Redis outage can exceed the core team's limit | confirm fail-open or fail-closed with the core team |
 | Retention periods are a starting point | keeping data too long or too short | confirm with compliance |
-| Letters store full HTML | about 2 KB per letter | store the template version and values; render on demand (planned) |
-| Audit trail grows forever | storage | archive old months (planned; design around the insert-only trigger) |
-| No partitioning | deletes cost work; no instant drop of old days | partition the big tables by day or month (planned) |
+| Partitioning is a paid Oracle option | without it, old data is deleted row by row and the audit trail stays in its table | decide the production edition; the code works either way |
+| Audit archive files are the only copy of old months | a lost file loses a month of the trail | durable, backed-up storage, ideally a write-once bucket (another `ArchiveStore`) |
+| Old audit months are not searchable in the console | finding old history means reading a file | a restore tool that loads a month back, if auditors need it |
 | A million accounts not measured | unknown limits | run `perf/run.sh 1000000` on a machine with more memory |
 | Dependabot paused, OWASP check waiting for a key | updates and vulnerabilities not reported | resume Dependabot; add `NVD_API_KEY` |
 

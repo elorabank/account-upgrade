@@ -1,5 +1,6 @@
 package com.bank.upgrade.communication.config;
 
+import com.bank.upgrade.common.retention.PartitionDrop;
 import com.bank.upgrade.common.retention.RetentionRule;
 import io.micrometer.core.instrument.MeterRegistry;
 import com.bank.upgrade.common.events.AccountUpgraded;
@@ -9,6 +10,7 @@ import com.bank.upgrade.common.messaging.NonRetryableEventException;
 import com.bank.upgrade.common.messaging.OutboxService;
 import com.bank.upgrade.communication.domain.LetterTemplateRepository;
 import com.bank.upgrade.communication.domain.WelcomeLetterRepository;
+import com.bank.upgrade.communication.letter.LetterContent;
 import com.bank.upgrade.communication.letter.LetterRenderer;
 import com.bank.upgrade.communication.letter.LetterService;
 import com.bank.upgrade.communication.mail.LetterSendScheduler;
@@ -46,6 +48,11 @@ public class CommunicationConfig {
         return new LetterService(templates, letters, renderer);
     }
 
+    @Bean
+    LetterContent letterContent(LetterTemplateRepository templates, LetterRenderer renderer) {
+        return new LetterContent(templates, renderer);
+    }
+
     /** Every upgraded account gets a welcome letter. */
     @Bean
     EventSubscription accountUpgradedSubscription(LetterService letters, ObjectMapper mapper) {
@@ -59,10 +66,10 @@ public class CommunicationConfig {
     }
 
     @Bean
-    LetterSender letterSender(WelcomeLetterRepository letters, JavaMailSender mail, OutboxService outbox,
-            CommunicationProperties properties, PlatformTransactionManager transactionManager, Clock clock,
-            MeterRegistry meters) {
-        return new LetterSender(letters, mail, outbox, properties, transactionManager, clock, meters);
+    LetterSender letterSender(WelcomeLetterRepository letters, LetterContent content, JavaMailSender mail,
+            OutboxService outbox, CommunicationProperties properties, PlatformTransactionManager transactionManager,
+            Clock clock, MeterRegistry meters) {
+        return new LetterSender(letters, content, mail, outbox, properties, transactionManager, clock, meters);
     }
 
     /** Off in tests that drive sending themselves ({@code bank.communication.schedule.enabled=false}). */
@@ -72,11 +79,15 @@ public class CommunicationConfig {
         return new LetterSendScheduler(sender, properties.batchSize());
     }
 
-    /** Letters that were sent or failed for good, 400 days after they were written. PENDING letters are never deleted. */
+    /**
+     * Letters that were sent or failed for good, 400 days after they were written. PENDING letters are never deleted.
+     * The table is partitioned by month written (UTC): a month with no PENDING letter left is dropped whole.
+     */
     @Bean
     RetentionRule lettersRetention(JdbcTemplate jdbc) {
         return RetentionRule.olderThanTimestamp("letters", java.time.Duration.ofDays(400), jdbc, """
             DELETE FROM WELCOME_LETTER
-            WHERE STATUS IN ('SENT', 'FAILED') AND GENERATED_AT < ? AND ROWNUM <= ?""");
+            WHERE STATUS IN ('SENT', 'FAILED') AND GENERATED_AT < ? AND ROWNUM <= ?""")
+            .withPartitions(PartitionDrop.byMonth(jdbc, "WELCOME_LETTER", java.time.ZoneOffset.UTC, "STATUS = 'PENDING'"));
     }
 }

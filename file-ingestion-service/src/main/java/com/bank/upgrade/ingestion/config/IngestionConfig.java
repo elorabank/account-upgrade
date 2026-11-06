@@ -1,5 +1,6 @@
 package com.bank.upgrade.ingestion.config;
 
+import com.bank.upgrade.common.retention.PartitionDrop;
 import com.bank.upgrade.common.retention.RetentionRule;
 import com.bank.upgrade.ingestion.job.BatchHistoryPurge;
 import java.time.Duration;
@@ -78,13 +79,15 @@ public class IngestionConfig {
     /**
      * Staging rows are only needed until the upgrade service has planned the file (minutes after the load); kept
      * 30 days for support. The file's entry and its rejected rows stay: they are small and the console shows them.
+     * Each file has its own partition, dropped whole once the file qualifies.
      */
     @Bean
     RetentionRule stagingRetention(JdbcTemplate jdbc) {
         return RetentionRule.olderThanTimestamp("staging", Duration.ofDays(30), jdbc, """
             DELETE FROM ACCOUNT_STAGING WHERE FILE_ID IN
               (SELECT ID FROM FILE_INGESTION_LOG WHERE STATUS = 'COMPLETED' AND COMPLETED_AT < ?)
-            AND ROWNUM <= ?""");
+            AND ROWNUM <= ?""").withPartitions(PartitionDrop.byValue(jdbc, "ACCOUNT_STAGING", """
+            FILE_ID NOT IN (SELECT ID FROM FILE_INGESTION_LOG WHERE STATUS = 'COMPLETED' AND COMPLETED_AT < ?)"""));
     }
 
     /** Spring Batch's records of completed loads, kept 30 days. */

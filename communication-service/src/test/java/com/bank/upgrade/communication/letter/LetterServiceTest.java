@@ -60,7 +60,12 @@ class LetterServiceTest {
         assertThat(letter.getRecipient()).isEqualTo("asha@example.com");
         assertThat(letter.getTemplateId()).isEqualTo(4);
         assertThat(letter.getSubject()).isEqualTo("Welcome to Savings Plus");
-        assertThat(letter.getHtmlBody()).contains("Asha &lt;Rao&gt;").contains("0123").doesNotContain("AC261110000123");
+        // The values that fill the template, not the finished HTML: the email is built when it is sent
+        assertThat(letter.getHtmlBody()).isNull();
+        assertThat(letter.getCustomerName()).isEqualTo("Asha <Rao>");
+        assertThat(letter.getFromType()).isEqualTo("SAVINGS");
+        assertThat(letter.getToType()).isEqualTo("SAVINGS_PLUS");
+        assertThat(letter.getBusinessDate()).isEqualTo(LocalDate.of(2026, 11, 10));
         assertThat(letter.getStatus()).isEqualTo(WelcomeLetter.PENDING);
         assertThat(letter.getCorrelationId()).isEqualTo("file-3");
     }
@@ -92,6 +97,17 @@ class LetterServiceTest {
 
         assertThatThrownBy(() -> service.onUpgraded(upgrade(7, "GOLD_PLUS"), "file-3"))
             .isInstanceOf(NonRetryableEventException.class).hasMessageContaining("GOLD_PLUS");
+    }
+
+    @Test
+    void aTemplateThatCannotBeFilledIsCaughtBeforeAnyLetterPointsAtIt() {
+        var broken = template(5, "SAVINGS_PLUS", "Welcome");
+        broken.setBodyHtml("<p th:text=\"${customerName.noSuchProperty}\">x</p>");
+        when(templates.findFirstByAccountTypeAndActiveTrueOrderByVersionNoDesc("SAVINGS_PLUS")).thenReturn(Optional.of(broken));
+
+        assertThatThrownBy(() -> service.onUpgraded(upgrade(7, "SAVINGS_PLUS"), "file-3"))
+            .isInstanceOf(NonRetryableEventException.class).hasMessageContaining("WELCOME_SAVINGS_PLUS v2");
+        verify(letters, never()).save(any());
     }
 
     @Test

@@ -54,7 +54,9 @@ wait_for "outboxes empty" "sql \"select case when n = 0 then 'yes' else n || ' e
   (select count(*) from ING_OWNER.OUTBOX_EVENT where status = 'NEW') + (select count(*) from UPG_OWNER.OUTBOX_EVENT where status = 'NEW')
   + (select count(*) from COM_OWNER.OUTBOX_EVENT where status = 'NEW') n from dual);\"" "$LIMIT"
 FROM="(select min(started_at) from ING_OWNER.FILE_INGESTION_LOG where business_date = date '$DAY')"
-EXPECTED=$(sql "select (select count(*) from ING_OWNER.OUTBOX_EVENT where created_at >= $FROM) + (select count(*) from UPG_OWNER.OUTBOX_EVENT where created_at >= $FROM)
+# Every business event is audited; the "run now" signal to the upgrade copies (upgrade.run-requested) is not
+EXPECTED=$(sql "select (select count(*) from ING_OWNER.OUTBOX_EVENT where created_at >= $FROM)
+  + (select count(*) from UPG_OWNER.OUTBOX_EVENT where created_at >= $FROM and topic <> 'upgrade.run-requested')
   + (select count(*) from COM_OWNER.OUTBOX_EVENT where created_at >= $FROM) from dual;" | tr -d ' ')
 wait_for "audit trail complete" "sql \"select case when count(*) >= $EXPECTED then 'yes' else count(*) || ' of $EXPECTED' end
   from AUD_OWNER.AUDIT_EVENT where recorded_at >= $FROM;\"" "$LIMIT"

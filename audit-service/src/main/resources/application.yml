@@ -14,6 +14,12 @@ spring:
 bank:
   processed-events:
     enabled: true      # shared PROCESSED_EVENT table (consumer de-duplication)
+  audit:
+    archive:
+      # Months that ended more than 400 days ago move from AUDIT_EVENT to one gzip file each (JSON lines).
+      # Real environments mount durable storage here; see docs/adr/0022-audit-archive.md.
+      dir: ${AUDIT_ARCHIVE_DIR:audit-archive}
+      keep: 400d
 
 management:
   endpoints:

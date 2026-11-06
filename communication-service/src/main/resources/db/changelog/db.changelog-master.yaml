@@ -13,3 +13,7 @@ databaseChangeLog:
       file: db/changelog/003-welcome-templates.sql
   - include:
       file: db/changelog/004-letter-retention.sql
+  - include:
+      file: db/changelog/005-compact-letters.sql
+  - include:
+      file: db/changelog/006-partition-by-month.sql
