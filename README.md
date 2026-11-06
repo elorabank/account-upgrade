@@ -360,6 +360,18 @@ time) span every month; a drop keeps them usable (`UPDATE GLOBAL INDEXES`). Part
 option of Oracle Enterprise Edition (included in Oracle Free). Without it the changesets are skipped and marked as
 run, nothing is partitioned, and the clean-up deletes rows as before.
 
+**Statistics after converting a table that already holds data.** The conversion leaves the table with fresh
+statistics but without the detail that says how values are spread (histograms), so Oracle may think, for example,
+that a third of all letters are pending. Refresh them once the conversion is done, or let Oracle's nightly
+statistics job do it:
+
+```sql
+BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'WELCOME_LETTER'); END;   -- as the schema owner, for each converted table
+```
+
+The queries the pipeline runs all the time do not wait for that: the sender's due-letter query names its index
+(`IX_LETTER_STATUS_ID`, changeset `com-007`), and the upgrade claim uses the status-and-date index either way.
+
 ## Not done (learning project)
 
 Things a production system would need that this project leaves out on purpose:

@@ -17,3 +17,5 @@ databaseChangeLog:
       file: db/changelog/005-compact-letters.sql
   - include:
       file: db/changelog/006-partition-by-month.sql
+  - include:
+      file: db/changelog/007-due-letters-in-id-order.sql

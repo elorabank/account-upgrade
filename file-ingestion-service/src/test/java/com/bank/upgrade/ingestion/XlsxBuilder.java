@@ -4,7 +4,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
-import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 /** Builds small .xlsx files for tests. A cell value that is a Number is written as a number cell, anything else as text. */
@@ -43,8 +42,7 @@ public final class XlsxBuilder {
             if (v instanceof Number n) {
                 cell.setCellValue(n.doubleValue());
             } else {
-                cell.setCellType(CellType.STRING);
-                cell.setCellValue(v.toString());
+                cell.setCellValue(v.toString());   // a string value makes it a text cell
             }
         }
     }
