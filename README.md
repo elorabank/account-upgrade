@@ -16,7 +16,7 @@ Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 ## Run locally
 
 ```bash
-docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak, Redis, Prometheus, Grafana
+docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak, Redis, Prometheus, Alertmanager, Grafana
 mvn clean verify          # build and test: about 2 minutes, no Docker needed (see Tests)
 SPRING_PROFILES_ACTIVE=local mvn -pl file-ingestion-service spring-boot:run
 ```
@@ -25,7 +25,7 @@ Run the services with the `local` profile. It holds the local database and SFTP 
 changing host key, and uses Keycloak from docker-compose as the identity provider. Without it a service has no
 passwords and verifies the SFTP host key, which is what every real environment should do.
 
-Mailpit UI: http://localhost:8025 · Kafka UI: http://localhost:8070 · SFTP: localhost:2222 · Oracle: localhost:1521/FREEPDB1 · Keycloak: http://localhost:8180 · Grafana: http://localhost:3000 · Prometheus: http://localhost:9090
+Mailpit UI: http://localhost:8025 · Kafka UI: http://localhost:8070 · SFTP: localhost:2222 · Oracle: localhost:1521/FREEPDB1 · Keycloak: http://localhost:8180 · Grafana: http://localhost:3000 · Prometheus: http://localhost:9090 · Alertmanager: http://localhost:9093
 Schedules run in `bank.time-zone` (env `BANK_TIME_ZONE`, default `Asia/Kolkata`), never in the server's zone.
 Run Maven with JDK 21 (BlockHound does not work on newer JDKs yet).
 
@@ -263,6 +263,29 @@ from the Security section (password `local-pw`): `olivia.ops` sees and can do ev
 
 **Working on the UI.** `cd ops-ui && npm run watch` rebuilds into `ops-ui/target/classes/static` on every save; with the gateway running from IntelliJ, reload the page. `mvn verify` builds it with its own Node (`node.version` in the parent pom) and type-checks it first.
 
+## CI checks
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`:
+
+- `mvn verify`: compile, the unit and API tests, and test coverage per module (JaCoCo). The coverage reports are kept
+  with the run (the `coverage` artifact); locally they are `<module>/target/site/jacoco/index.html`.
+- SonarCloud analysis (bugs, code smells, coverage, duplication), when the `SONAR_TOKEN` secret is set. To switch it
+  on: sign in at https://sonarcloud.io with GitHub, import the `elorabank/account-upgrade` repository (organization
+  `elorabank`, project key `elorabank_account-upgrade`, as in the root pom), turn off *Automatic Analysis* in the
+  project's settings, create a token, and add it as the repository secret `SONAR_TOKEN`.
+
+`.github/workflows/security.yml` runs every Monday (and on demand, *Run workflow*): the OWASP dependency-check looks
+up every dependency in the US National Vulnerability Database and fails on a critical finding (CVSS 9 or more); the
+full report is kept with the run. It needs a free API key from https://nvd.nist.gov/developers/request-an-api-key as
+the repository secret `NVD_API_KEY`; without it the run only warns. Locally: `NVD_API_KEY=<key> mvn -DskipTests
+install org.owasp:dependency-check-maven:aggregate`, report in `target/dependency-check-report.html` (the first run
+downloads the database, which takes a while).
+
+Dependabot (`.github/dependabot.yml`) opens weekly pull requests with newer versions of the Maven dependencies, the
+ops console's npm packages and the GitHub actions, and monthly for the docker-compose images; CI checks each one.
+For pull requests that fix known vulnerabilities, also switch on *Dependabot alerts* and *security updates* in the
+repository's Settings > Advanced Security.
+
 ## Not done (learning project)
 
 Things a production system would need that this project leaves out on purpose:
@@ -280,8 +303,14 @@ Things a production system would need that this project leaves out on purpose:
 ## Monitoring
 
 Every service publishes its metrics at `/actuator/prometheus`. The local Prometheus (http://localhost:9090) scrapes
-the services running on this machine every 5 seconds, and Grafana (http://localhost:3000, no sign-in needed to look;
-`admin` / `admin` to edit) opens on the **Account upgrade** dashboard.
+the services running on this machine every 5 seconds, and Grafana (http://localhost:3000) opens on the **Account
+upgrade** dashboard.
+
+**Signing in to Grafana.** *Sign in with Keycloak*, with the same people as the ops console (password `local-pw`):
+`olivia.ops` (`AU_OPS_ADMIN`) becomes a Grafana Admin; `victor.view`, `sam.support` and `ada.audit` may look but not
+change anything; anyone in none of these groups is refused. Signing out of Grafana also signs out of Keycloak. The
+local `admin` / `admin` login stays for emergencies. Like the `prometheus` client below, the `grafana` client only
+exists in a Keycloak recreated after it was added (`docker compose up -d --force-recreate keycloak keycloak-setup`).
 
 **Who may read metrics.** `/actuator/prometheus` needs a token with scope `metrics.read`, which only Keycloak's
 `prometheus` client gets; a person's token, even an ops admin's, is refused. Prometheus fetches and renews that token
@@ -314,6 +343,24 @@ existed does not have it: recreate it once with `docker compose up -d --force-re
 
 Every metric carries an `application` tag; copies of a service are told apart by Prometheus's `instance` label
 (`localhost:8082`, `localhost:8092`, ...).
+
+**Alerts.** Prometheus checks the rules in `infra/monitoring/alerts.yml` every 15 seconds (Prometheus > Alerts shows
+their state). Firing alerts go to Alertmanager (http://localhost:9093), which groups them and emails
+`ops-team@bank.example`; locally that mailbox is Mailpit (http://localhost:8025), and a "resolved" email follows when
+it is over.
+
+| Alert | Fires when | Severity |
+|---|---|---|
+| `ServiceDown` | a service cannot be scraped for 1 minute (the two extra upgrade copies are marked optional and left out) | critical |
+| `EventDeadLettered` | any event was parked on a dead-letter topic | warning |
+| `KafkaConsumerLagHigh` | a service is more than 5000 messages behind on a topic for 10 minutes | warning |
+| `OutboxFallingBehind` | the oldest unpublished outbox event is older than 5 minutes, for 5 minutes | warning |
+| `CoreSystemUnavailable` | more than 20% of core-system calls fail as unavailable, for 5 minutes | critical |
+| `UpgradeCopyDied` | requests were taken over from a copy whose lease ran out | info |
+| `WelcomeEmailsFailing` | a welcome email failed for good | warning |
+
+With nothing running, `ServiceDown` fires after about a minute and its email arrives a little later: an easy way to
+see the whole path work.
 
 **Changing the dashboard.** It is the file `infra/monitoring/grafana/dashboards/account-upgrade.json`, loaded at
 start and re-read every 10 seconds; edits in the Grafana UI are not kept. Edit it in Grafana, use *Export > Save to

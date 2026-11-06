@@ -39,6 +39,15 @@
     <excel-streaming-reader.version>6.0.0</excel-streaming-reader.version>
     <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
     <node.version>v22.12.0</node.version>
+    <jacoco.version>0.8.15</jacoco.version>
+    <sonar-maven-plugin.version>5.7.0.6970</sonar-maven-plugin.version>
+    <dependency-check.version>12.2.2</dependency-check.version>
+    <!-- Filled by JaCoCo's agent; empty when tests run without it -->
+    <argLine></argLine>
+    <!-- SonarCloud (CI, when the SONAR_TOKEN secret is set) -->
+    <sonar.host.url>https://sonarcloud.io</sonar.host.url>
+    <sonar.organization>elorabank</sonar.organization>
+    <sonar.projectKey>elorabank_account-upgrade</sonar.projectKey>
   </properties>
 
   <dependencyManagement>
@@ -110,11 +119,61 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
           <configuration>
-            <!-- BlockHound needs this flag on JDK 13+ -->
-            <argLine>-XX:+AllowRedefinitionToAddDeleteMethods</argLine>
+            <!-- JaCoCo's agent (@{argLine}), and the flag BlockHound needs on JDK 13+ -->
+            <argLine>@{argLine} -XX:+AllowRedefinitionToAddDeleteMethods</argLine>
+          </configuration>
+        </plugin>
+        <plugin>
+          <!-- mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar (CI runs it when SONAR_TOKEN is set) -->
+          <groupId>org.sonarsource.scanner.maven</groupId>
+          <artifactId>sonar-maven-plugin</artifactId>
+          <version>${sonar-maven-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <!-- Known vulnerabilities in the dependencies: mvn org.owasp:dependency-check-maven:aggregate
+               (weekly in CI, .github/workflows/security.yml). Needs an NVD API key in NVD_API_KEY. -->
+          <groupId>org.owasp</groupId>
+          <artifactId>dependency-check-maven</artifactId>
+          <version>${dependency-check.version}</version>
+          <configuration>
+            <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
+            <formats>
+              <format>HTML</format>
+              <format>JSON</format>
+            </formats>
+            <!-- Fail on critical findings (CVSS 9+); the report lists everything -->
+            <failBuildOnCVSS>9</failBuildOnCVSS>
+            <!-- The ops console's npm packages are watched by Dependabot instead; OSS Index needs its own login -->
+            <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
+            <nodeAuditAnalyzerEnabled>false</nodeAuditAnalyzerEnabled>
+            <retireJsAnalyzerEnabled>false</retireJsAnalyzerEnabled>
+            <ossIndexAnalyzerEnabled>false</ossIndexAnalyzerEnabled>
           </configuration>
         </plugin>
       </plugins>
     </pluginManagement>
+    <plugins>
+      <plugin>
+        <!-- Test coverage of every module: target/site/jacoco/index.html after mvn verify (Sonar reads the XML) -->
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco.version}</version>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
   </build>
 </project>
