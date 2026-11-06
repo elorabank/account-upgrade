@@ -10,7 +10,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param from        sender address of the welcome email
  * @param maxAttempts sending attempts before a letter is FAILED
  * @param retryDelay  wait after the first failed attempt, doubled after each further one
- * @param batchSize   letters sent per round
+ * @param batchSize   letters locked and sent per round
+ * @param connections SMTP connections a round sends over in parallel, each carrying an equal share of the batch
  */
 @ConfigurationProperties("bank.communication")
 public record CommunicationProperties(
@@ -18,4 +19,5 @@ public record CommunicationProperties(
         @DefaultValue("Example Bank") String fromName,
         @DefaultValue("5") int maxAttempts,
         @DefaultValue("1m") Duration retryDelay,
-        @DefaultValue("20") int batchSize) {}
+        @DefaultValue("100") int batchSize,
+        @DefaultValue("4") int connections) {}

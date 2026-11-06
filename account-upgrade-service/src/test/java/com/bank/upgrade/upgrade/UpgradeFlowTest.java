@@ -38,6 +38,7 @@ import org.springframework.context.annotation.Primary;
 import com.bank.upgrade.common.api.StagedAccount;
 import com.bank.upgrade.upgrade.staging.StagingSource;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -48,7 +49,9 @@ import org.springframework.transaction.support.TransactionTemplate;
     "bank.upgrade.gateway=test",
     "bank.upgrade.schedule.enabled=false",
     "bank.upgrade.retry-backoff=0s",
-    "bank.upgrade.batch-size=2"
+    "bank.upgrade.batch-size=2",
+    // One call at a time keeps the counts in these tests exact; UpgradeRunConcurrencyTest covers parallel calls
+    "bank.upgrade.concurrency=1"
 })
 class UpgradeFlowTest {
 
@@ -66,11 +69,13 @@ class UpgradeFlowTest {
         }
 
         @Override
-        public void upgrade(UpgradeCommand command) {
-            calls.add(command);
-            var queue = behaviour.get(command.accountNo());
-            RuntimeException next = queue == null ? null : queue.poll();
-            if (next != null) throw next;
+        public Mono<Void> upgrade(UpgradeCommand command) {
+            return Mono.fromRunnable(() -> {
+                calls.add(command);
+                var queue = behaviour.get(command.accountNo());
+                RuntimeException next = queue == null ? null : queue.poll();
+                if (next != null) throw next;
+            });
         }
 
         long callsFor(String account) {

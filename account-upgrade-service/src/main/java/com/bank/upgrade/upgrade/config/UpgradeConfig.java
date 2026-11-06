@@ -70,8 +70,8 @@ public class UpgradeConfig {
     /** {@code bank.upgrade.gateway=simulated} (the default) until a real core-system adapter is added under another value. */
     @Bean
     @ConditionalOnProperty(prefix = "bank.upgrade", name = "gateway", havingValue = "simulated", matchIfMissing = true)
-    AccountUpgradeGateway accountUpgradeGateway() {
-        return new SimulatedAccountUpgradeGateway();
+    AccountUpgradeGateway accountUpgradeGateway(UpgradeProperties properties) {
+        return new SimulatedAccountUpgradeGateway(properties.simulated().latency(), properties.simulated().failureRate());
     }
 
     @Bean

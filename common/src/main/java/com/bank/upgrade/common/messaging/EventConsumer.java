@@ -10,8 +10,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -33,19 +37,27 @@ import reactor.util.context.Context;
 import reactor.util.retry.Retry;
 
 /**
- * Reads the subscribed topics and, for each message:
+ * Reads the subscribed topics and, for each batch of messages from one partition:
  * <ol>
- *   <li>skips it if its event id was already processed;</li>
- *   <li>in ONE database transaction records the event id and runs the handler;</li>
- *   <li>only then acknowledges the Kafka offset, so a crash replays the message and step 1 skips it;</li>
- *   <li>on failure retries with backoff, and after the last attempt parks the message on {@code <topic>.DLT}.</li>
+ *   <li>skips events whose id was already processed (also a repeat inside the batch);</li>
+ *   <li>in ONE database transaction records the new event ids and runs the handler for each, in order;</li>
+ *   <li>only then acknowledges the Kafka offsets, so a crash replays the batch and step 1 skips what was done.</li>
  * </ol>
- * Messages are handled one at a time, which keeps order. If the dead-letter topic cannot be written the
- * consumer restarts from the last acknowledged offset rather than skipping the message.
+ * One commit per batch instead of one per event is what lets a busy topic go fast; a quiet topic still gets each
+ * message within {@code batchWait}. If a batch fails it is rolled back and handled again one event at a time: each
+ * event is retried with backoff, and after the last attempt parked on {@code <topic>.DLT}, so one bad event never
+ * holds back the others. (An event in a failed batch is therefore tried once more than {@code maxAttempts}.)
+ * <p>
+ * Each partition is handled in order, one message at a time; different partitions are handled in parallel. Events
+ * are keyed by what they are about (for example the account), so everything about one account stays in order while
+ * a topic with N partitions is worked on N at a time. If the dead-letter topic cannot be written the consumer
+ * restarts from the last acknowledged offset rather than skipping the message.
  */
 public class EventConsumer implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(EventConsumer.class);
+    /** groupBy needs a slot per partition this consumer is assigned; far more than any topic here has. */
+    private static final int MAX_PARTITIONS = 1024;
 
     private final Map<String, EventHandler> handlers;
     private final Map<String, Object> consumerProperties;
@@ -84,11 +96,58 @@ public class EventConsumer implements SmartLifecycle {
             .commitBatchSize(100);
         log.info("Consuming {}", handlers.keySet());
         running = Flux.defer(() -> KafkaReceiver.create(options).receive())
-            .concatMap(this::process, 1)
+            .groupBy(record -> record.receiverOffset().topicPartition())
+            .flatMap(partition -> partition
+                    .bufferTimeout(Math.max(1, properties.batchSize()), properties.batchWait(), true)
+                    .concatMap(this::processBatch, 1),
+                MAX_PARTITIONS)
             .retryWhen(Retry.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
                 .maxBackoff(Duration.ofSeconds(30))
                 .doBeforeRetry(signal -> log.warn("Event consumer restarting after: {}", signal.failure().toString())))
             .subscribe();
+    }
+
+    /** A batch in one transaction; if that fails, the same records one by one with retries and dead-lettering. */
+    private Mono<Void> processBatch(List<ReceiverRecord<String, String>> records) {
+        if (records.size() == 1) {
+            return process(records.get(0));
+        }
+        return Mono.fromRunnable(() -> handleBatch(records))
+            .subscribeOn(Schedulers.boundedElastic())
+            .doOnSuccess(done -> records.forEach(r -> r.receiverOffset().acknowledge()))
+            .onErrorResume(error -> {
+                log.warn("Batch of {} from {}-{} failed ({}), handling them one by one",
+                    records.size(), records.get(0).topic(), records.get(0).partition(), error.toString());
+                return Flux.fromIterable(records).concatMap(this::process, 1).then();
+            })
+            .then();
+    }
+
+    /** One attempt at a whole batch. Blocking: runs on a boundedElastic thread. Any failure rolls back all of it. */
+    private void handleBatch(List<ReceiverRecord<String, String>> records) {
+        Map<String, EventEnvelope> events = new LinkedHashMap<>();
+        Map<String, String> topics = new HashMap<>();
+        Map<String, String> headerIds = new HashMap<>();
+        for (ReceiverRecord<String, String> record : records) {
+            EventEnvelope event = parse(record.value());   // a bad message fails the batch; the one-by-one pass parks it
+            events.putIfAbsent(event.eventId(), event);
+            topics.putIfAbsent(event.eventId(), record.topic());
+            headerIds.putIfAbsent(event.eventId(), CorrelationId.sanitize(headerValue(record.headers().toArray(), CorrelationId.KAFKA_HEADER)));
+        }
+        transaction.executeWithoutResult(status -> {
+            Set<String> done = new HashSet<>();
+            processed.findAllById(events.keySet()).forEach(p -> done.add(p.getEventId()));
+            var fresh = events.values().stream().filter(e -> !done.contains(e.eventId())).toList();
+            // flushed first: a concurrent duplicate fails here, before any handler does work
+            processed.saveAllAndFlush(fresh.stream().map(e -> new ProcessedEvent(e.eventId(), topics.get(e.eventId()))).toList());
+            for (EventEnvelope event : fresh) {
+                String topic = topics.get(event.eventId());
+                String correlationId = CorrelationId.isValid(event.correlationId()) ? event.correlationId() : headerIds.get(event.eventId());
+                try (var scope = CorrelationId.open(correlationId)) {
+                    invoke(handlers.get(topic), event);
+                }
+            }
+        });
     }
 
     private Mono<Void> process(ReceiverRecord<String, String> record) {

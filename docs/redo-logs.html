@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oracle Redo Logs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,650&family=Public+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a reading column with a sticky contents rail on wide screens; diagrams and tables scroll inside their own boxes. */
+:root {
+  --paper: #f7f8fa;
+  --sheet: #ffffff;
+  --ink: #1b2430;
+  --muted: #5b6676;
+  --rule: #dfe3ea;
+  --accent: #1f5fa8;      /* redo: the journal, LGWR, the log */
+  --accent-soft: #e5eef9;
+  --warn: #a65c00;        /* waits and stalls */
+  --warn-soft: #fbf0e1;
+  --ok: #1d7a4c;
+  --ok-soft: #e4f3ea;
+  --code-bg: #eef1f5;
+  --font-display: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  --step-0: 1rem;
+  --step-1: 1.2rem;
+  --step-2: 1.5rem;
+  --step-3: 2.1rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12161c; --sheet: #191e26; --ink: #e5e9ef; --muted: #9aa5b4; --rule: #2b323d;
+    --accent: #7fb2ee; --accent-soft: #1d2c40; --warn: #f0b35c; --warn-soft: #3a2a14;
+    --ok: #6fd3a0; --ok-soft: #163327; --code-bg: #20262f; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12161c; --sheet: #191e26; --ink: #e5e9ef; --muted: #9aa5b4; --rule: #2b323d;
+  --accent: #7fb2ee; --accent-soft: #1d2c40; --warn: #f0b35c; --warn-soft: #3a2a14;
+  --ok: #6fd3a0; --ok-soft: #163327; --code-bg: #20262f; color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--step-0);
+  line-height: 1.65;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 48px;
+}
+@media (max-width: 900px) { .page { grid-template-columns: minmax(0, 1fr); gap: 0; } .toc { display: none; } }
+
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; padding-top: 112px; font-size: 0.9rem; }
+.toc p { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; border-left: 1px solid var(--rule); }
+.toc a { display: block; padding: 2px 0 2px 12px; color: var(--muted); text-decoration: none; }
+.toc a:hover, .toc a:focus-visible { color: var(--accent); }
+
+main { min-width: 0; max-width: 760px; }
+header.lead { padding-block: 56px 24px; border-bottom: 1px solid var(--rule); margin-bottom: 8px; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.06em; color: var(--accent); margin: 0 0 12px; }
+h1 { font-family: var(--font-display); font-weight: 650; font-size: var(--step-3); line-height: 1.15; margin: 0 0 16px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 650; font-size: var(--step-2); line-height: 1.25; margin: 48px 0 12px; text-wrap: balance; scroll-margin-top: 24px; }
+h3 { font-family: var(--font-body); font-weight: 600; font-size: var(--step-1); margin: 28px 0 8px; }
+p, li { max-width: 68ch; }
+.standfirst { font-size: 1.12rem; color: var(--muted); margin: 0; }
+a { color: var(--accent); }
+strong { font-weight: 600; }
+code, kbd { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+
+.summary { background: var(--accent-soft); border-radius: 10px; padding: 20px 24px; margin: 24px 0; }
+.summary h2 { margin-top: 0; font-size: var(--step-1); }
+.summary ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+
+.figure { margin: 24px 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; overflow-x: auto; }
+.figure svg { display: block; min-width: 640px; width: 100%; height: auto; }
+.figure figcaption, .caption { font-size: 0.88rem; color: var(--muted); margin-top: 10px; }
+svg text { font-family: var(--font-body); }
+svg .t { fill: var(--ink); font-size: 14px; }
+svg .ts { fill: var(--muted); font-size: 12px; }
+svg .tm { fill: var(--muted); font-size: 12px; font-family: var(--font-mono); }
+svg .box { fill: var(--sheet); stroke: var(--rule); stroke-width: 1.5; }
+svg .box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+svg .box-warn { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 1.5; }
+svg .box-ok { fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.5; }
+svg .zone { fill: none; stroke: var(--rule); stroke-width: 1.5; stroke-dasharray: 6 5; }
+svg .arrow { stroke: var(--muted); stroke-width: 1.6; fill: none; }
+svg .arrow-accent { stroke: var(--accent); stroke-width: 2; fill: none; }
+svg .arrow-warn { stroke: var(--warn); stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; }
+svg .head { fill: var(--muted); }
+svg .head-accent { fill: var(--accent); }
+svg .head-warn { fill: var(--warn); }
+
+.table-wrap { overflow-x: auto; margin: 16px 0; border: 1px solid var(--rule); border-radius: 10px; background: var(--sheet); }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; background: var(--code-bg); }
+tr:last-child td { border-bottom: none; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.status { display: inline-block; font-family: var(--font-mono); font-size: 0.78rem; padding: 1px 8px; border-radius: 999px; background: var(--code-bg); }
+.status.current { background: var(--accent-soft); color: var(--accent); }
+.status.active { background: var(--warn-soft); color: var(--warn); }
+.status.inactive { background: var(--ok-soft); color: var(--ok); }
+
+.steps { padding-left: 22px; display: grid; gap: 8px; }
+.note { border-left: 3px solid var(--warn); border-radius: 0; padding: 4px 0 4px 16px; color: var(--ink); margin: 20px 0; }
+.note strong { color: var(--warn); }
+
+/* simulator */
+.sim { background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; padding: 20px; margin: 24px 0; display: grid; gap: 18px; }
+.sim-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px 24px; }
+.sim label { display: grid; gap: 4px; font-size: 0.9rem; }
+.sim label span { display: flex; justify-content: space-between; gap: 8px; }
+.sim label output { font-family: var(--font-mono); color: var(--accent); }
+.sim input[type="range"] { width: 100%; accent-color: var(--accent); }
+.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.presets button { font: inherit; font-size: 0.88rem; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); cursor: pointer; }
+.presets button:hover, .presets button:focus-visible { border-color: var(--accent); color: var(--accent); }
+.timeline { display: flex; height: 28px; border-radius: 6px; overflow: hidden; border: 1px solid var(--rule); background: var(--paper); }
+.timeline .fill { background: var(--accent-soft); border-right: 1px solid var(--accent); }
+.timeline .stall { background: var(--warn); }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.85rem; color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+.verdict { padding: 12px 16px; border-radius: 8px; font-size: 0.95rem; }
+.verdict.good { background: var(--ok-soft); }
+.verdict.bad { background: var(--warn-soft); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.stats div { display: grid; gap: 2px; }
+.stats b { font-family: var(--font-mono); font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.stats small { color: var(--muted); }
+
+pre { position: relative; background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-family: var(--font-mono); font-size: 0.84rem; line-height: 1.55; margin: 12px 0; }
+pre code { background: none; padding: 0; }
+.copy { position: absolute; top: 8px; right: 8px; font: inherit; font-family: var(--font-body); font-size: 0.78rem; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--sheet); color: var(--muted); cursor: pointer; }
+.copy:hover, .copy:focus-visible { color: var(--accent); border-color: var(--accent); }
+dl.gloss { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 20px; }
+dl.gloss dt { font-family: var(--font-mono); font-size: 0.88rem; color: var(--accent); }
+dl.gloss dd { margin: 0; }
+@media (max-width: 560px) { dl.gloss { grid-template-columns: minmax(0, 1fr); } dl.gloss dd { margin-bottom: 8px; } }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <nav class="toc" aria-label="Contents">
+    <p>Contents</p>
+    <ol>
+      <li><a href="#journal">Why a journal</a></li>
+      <li><a href="#commit">What a commit does</a></li>
+      <li><a href="#records">What is in a redo record</a></li>
+      <li><a href="#circle">Groups and the circle</a></li>
+      <li><a href="#checkpoint">Checkpoints</a></li>
+      <li><a href="#waits">When commits wait</a></li>
+      <li><a href="#simulator">Try it: when do commits stall?</a></li>
+      <li><a href="#project">What we saw in this project</a></li>
+      <li><a href="#sizing">Sizing redo logs</a></li>
+      <li><a href="#undo">Redo and undo</a></li>
+      <li><a href="#recovery">Crash recovery</a></li>
+      <li><a href="#archive">Archived logs</a></li>
+      <li><a href="#elsewhere">The same idea elsewhere</a></li>
+      <li><a href="#queries">Look at it yourself</a></li>
+      <li><a href="#glossary">Glossary</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="lead">
+      <p class="eyebrow">ACCOUNT UPGRADE PLATFORM · DATABASE NOTES</p>
+      <h1>Oracle redo logs</h1>
+      <p class="standfirst">How Oracle makes a commit both fast and safe, why our local database kept stalling during bulk runs, and what we changed.</p>
+    </header>
+
+    <section class="summary" aria-labelledby="short">
+      <h2 id="short">The short version</h2>
+      <ul>
+        <li>The redo log is Oracle's <strong>write-ahead journal</strong>: every change is described in it before the change counts as done.</li>
+        <li>A <strong>commit</strong> only waits for its redo to reach disk. The changed table and index blocks are written later, in the background.</li>
+        <li>Redo is written to a small set of files used <strong>in a circle</strong>. A file can only be reused once the changes it describes are safely in the data files (a <strong>checkpoint</strong>).</li>
+        <li>If the files are too small, Oracle runs out of reusable ones and <strong>every commit waits</strong>. That is what happened on our local Oracle Free with its two 10&nbsp;MB files.</li>
+        <li>If a crash happens, Oracle <strong>replays the redo</strong> at startup, so nothing committed is ever lost.</li>
+      </ul>
+    </section>
+
+    <h2 id="journal">Why a journal at all</h2>
+    <p>A table's rows live in blocks spread across data files. One transaction can touch blocks in many places: the row itself, a few index entries, the undo segment that remembers the old values. Writing every one of those blocks to disk before saying "committed" would mean many small writes to scattered places, and each one waits for the disk.</p>
+    <p>Instead, Oracle writes a <strong>short description of each change</strong> to one file, always at the end. Appending to the end of one file is the fastest kind of write a disk does. The scattered block writes still happen, but later and in bulk, while nobody is waiting for them.</p>
+    <p>The price is a rule Oracle never breaks, called <strong>write-ahead logging</strong>: the description of a change must be on disk before the changed block may be written to its data file. That rule is what makes the shortcut safe.</p>
+
+    <h2 id="commit">What a commit does</h2>
+    <figure class="figure">
+      <svg viewBox="0 0 760 330" role="img" aria-labelledby="f1t f1d">
+        <title id="f1t">The path of a change and a commit</title>
+        <desc id="f1d">A transaction changes blocks in the buffer cache and writes redo records to the log buffer, both in memory. At commit, the log writer writes the log buffer to the current online redo log group and the transaction waits for that. Later, the database writer writes the changed blocks to the data files at checkpoints.</desc>
+        <defs>
+          <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="head"/></marker>
+          <marker id="ha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="head-accent"/></marker>
+          <marker id="hw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="head-warn"/></marker>
+        </defs>
+        <rect class="zone" x="190" y="12" width="250" height="306" rx="10"/>
+        <text class="ts" x="204" y="34">MEMORY (SGA)</text>
+        <rect class="zone" x="520" y="12" width="228" height="306" rx="10"/>
+        <text class="ts" x="534" y="34">DISK</text>
+
+        <rect class="box" x="12" y="130" width="150" height="64" rx="8"/>
+        <text class="t" x="87" y="157" text-anchor="middle">Your transaction</text>
+        <text class="ts" x="87" y="177" text-anchor="middle">UPDATE … COMMIT</text>
+
+        <rect class="box" x="212" y="56" width="206" height="70" rx="8"/>
+        <text class="t" x="315" y="84" text-anchor="middle">Buffer cache</text>
+        <text class="ts" x="315" y="104" text-anchor="middle">changed ("dirty") blocks</text>
+
+        <rect class="box-accent" x="212" y="206" width="206" height="70" rx="8"/>
+        <text class="t" x="315" y="234" text-anchor="middle">Log buffer</text>
+        <text class="ts" x="315" y="254" text-anchor="middle">redo records, 4 MB here</text>
+
+        <rect class="box" x="542" y="56" width="184" height="70" rx="8"/>
+        <text class="t" x="634" y="84" text-anchor="middle">Data files</text>
+        <text class="ts" x="634" y="104" text-anchor="middle">tables, indexes, undo</text>
+
+        <rect class="box-accent" x="542" y="206" width="184" height="70" rx="8"/>
+        <text class="t" x="634" y="234" text-anchor="middle">Online redo log</text>
+        <text class="ts" x="634" y="254" text-anchor="middle">the CURRENT group</text>
+
+        <path class="arrow" d="M162 150 L208 100" marker-end="url(#h)"/>
+        <path class="arrow-accent" d="M162 176 L208 228" marker-end="url(#ha)"/>
+        <text class="tm" x="150" y="122" text-anchor="middle">1 change</text>
+        <text class="tm" x="150" y="226" text-anchor="middle">2 describe</text>
+
+        <path class="arrow-accent" d="M418 241 L538 241" marker-end="url(#ha)"/>
+        <text class="tm" x="478" y="230" text-anchor="middle">3 LGWR</text>
+        <text class="ts" x="478" y="268" text-anchor="middle">commit waits here</text>
+        <text class="ts" x="478" y="284" text-anchor="middle">("log file sync")</text>
+
+        <path class="arrow-warn" d="M418 91 L538 91" marker-end="url(#hw)"/>
+        <text class="tm" x="478" y="80" text-anchor="middle">4 DBWn</text>
+        <text class="ts" x="478" y="114" text-anchor="middle">later, nobody waits</text>
+      </svg>
+      <figcaption>The blue path is the one a commit waits for; the dashed path happens later in the background.</figcaption>
+    </figure>
+    <ol class="steps">
+      <li><strong>Change.</strong> Your session changes the blocks in memory (the buffer cache). They are now "dirty": newer in memory than on disk.</li>
+      <li><strong>Describe.</strong> For every change it also writes a redo record into the log buffer, another area of memory.</li>
+      <li><strong>Commit.</strong> The log writer process (<code>LGWR</code>) writes the log buffer to the current redo log file. Your commit returns as soon as that write is on disk. The time you spend waiting is reported as <code>log file sync</code>.</li>
+      <li><strong>Later.</strong> The database writer processes (<code>DBWn</code>) write the dirty blocks to the data files, in big batches, whenever it suits them.</li>
+    </ol>
+    <p>LGWR does not only write at commit. It also writes every three seconds, when the log buffer is a third full, and just before DBWn writes a dirty block (the write-ahead rule). Because of that, the redo of a big transaction is usually on disk long before its commit, and the commit itself is quick. When many sessions commit at the same moment, LGWR writes all their redo in one go; this is called <strong>group commit</strong>.</p>
+
+    <h2 id="records">What is in a redo record</h2>
+    <p>A redo record is not the SQL you ran. It is a list of <strong>change vectors</strong>, each saying, at the level of a single block, "in block X of file Y, change these bytes to these values". One <code>UPDATE</code> of one row typically produces change vectors for:</p>
+    <ul>
+      <li>the table block holding the row,</li>
+      <li>each index block whose entry changed,</li>
+      <li>the <strong>undo</strong> block where the old value is kept (yes, changes to undo are protected by redo too),</li>
+      <li>the transaction table that records the transaction's state.</li>
+    </ul>
+    <p>Because redo describes physical block changes, replaying it is mechanical and fast: no SQL is parsed or optimised again. Every record gets a <strong>system change number (SCN)</strong>, Oracle's logical clock, so changes can be replayed in exactly the order they happened.</p>
+
+    <h2 id="circle">Groups, members and the circle</h2>
+    <p>Online redo logs come in <strong>groups</strong>. Oracle needs at least two. LGWR writes to one group at a time, the <code>CURRENT</code> one. When it is full, Oracle does a <strong>log switch</strong> and carries on with the next group; after the last group it goes back to the first.</p>
+    <figure class="figure">
+      <svg viewBox="0 0 760 250" role="img" aria-labelledby="f2t f2d">
+        <title id="f2t">Three redo log groups used in a circle</title>
+        <desc id="f2d">Group 1 is inactive and reusable because its checkpoint is complete. Group 2 is active because its checkpoint is still running. Group 3 is current and being written by LGWR. After group 3 fills, LGWR wraps around to group 1, which must be inactive by then.</desc>
+        <defs>
+          <marker id="h2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="head"/></marker>
+        </defs>
+        <rect class="box-ok" x="24" y="40" width="200" height="110" rx="10"/>
+        <text class="t" x="124" y="72" text-anchor="middle">Group 1</text>
+        <text class="tm" x="124" y="96" text-anchor="middle">INACTIVE</text>
+        <text class="ts" x="124" y="120" text-anchor="middle">checkpoint done,</text>
+        <text class="ts" x="124" y="137" text-anchor="middle">free to be reused</text>
+
+        <rect class="box-warn" x="280" y="40" width="200" height="110" rx="10"/>
+        <text class="t" x="380" y="72" text-anchor="middle">Group 2</text>
+        <text class="tm" x="380" y="96" text-anchor="middle">ACTIVE</text>
+        <text class="ts" x="380" y="120" text-anchor="middle">full, its checkpoint</text>
+        <text class="ts" x="380" y="137" text-anchor="middle">is still running</text>
+
+        <rect class="box-accent" x="536" y="40" width="200" height="110" rx="10"/>
+        <text class="t" x="636" y="72" text-anchor="middle">Group 3</text>
+        <text class="tm" x="636" y="96" text-anchor="middle">CURRENT</text>
+        <text class="ts" x="636" y="120" text-anchor="middle">LGWR is writing</text>
+        <text class="ts" x="636" y="137" text-anchor="middle">here now</text>
+
+        <path class="arrow" d="M224 95 L276 95" marker-end="url(#h2)"/>
+        <path class="arrow" d="M480 95 L532 95" marker-end="url(#h2)"/>
+        <path class="arrow" d="M636 150 L636 196 L124 196 L124 154" marker-end="url(#h2)"/>
+        <text class="ts" x="380" y="220" text-anchor="middle">when group 3 is full, LGWR wraps around to group 1, which must be INACTIVE by then</text>
+      </svg>
+      <figcaption>The order of writing is 1, 2, 3, 1, 2, 3 … The status shows how safe each group is to overwrite.</figcaption>
+    </figure>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Status in <code>v$log</code></th><th>Meaning</th><th>Can it be overwritten?</th></tr></thead>
+        <tbody>
+          <tr><td><span class="status current">CURRENT</span></td><td>LGWR is writing to it now.</td><td>No</td></tr>
+          <tr><td><span class="status active">ACTIVE</span></td><td>Full, but some of the changes it describes are not yet in the data files. It is still needed if the instance crashes.</td><td>No, not until its checkpoint finishes</td></tr>
+          <tr><td><span class="status inactive">INACTIVE</span></td><td>Full, and every change it describes is in the data files.</td><td>Yes (in ARCHIVELOG mode, once it is also archived)</td></tr>
+          <tr><td><span class="status">UNUSED</span></td><td>Never written yet, for example just after it was added.</td><td>Yes</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>A group can have several <strong>members</strong>: identical copies, ideally on different disks. LGWR writes to all of them at once, so losing one disk does not lose committed work. Production databases usually have two members per group. Our local Oracle has one, which is fine for a laptop.</p>
+
+    <h2 id="checkpoint">Checkpoints</h2>
+    <p>A <strong>checkpoint</strong> is the point up to which every change is safely in the data files. Oracle moves it forward continuously: DBWn keeps writing dirty blocks, oldest changes first. At every log switch, Oracle also makes sure the checkpoint soon passes the end of the group it just left. Once it has, that group is no longer needed for crash recovery and becomes <span class="status inactive">INACTIVE</span>.</p>
+    <p>So two things race each other: <strong>LGWR filling the other groups</strong>, and <strong>DBWn writing out the changes described in the group LGWR wants to reuse</strong>. While DBWn wins, nobody notices. When LGWR wins, the database has nowhere to write redo, and it has to stop.</p>
+
+    <h2 id="waits">When commits wait</h2>
+    <p>Oracle measures what sessions wait for. These are the waits that belong to redo:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Wait event</th><th>What is happening</th><th>Usual cause</th></tr></thead>
+        <tbody>
+          <tr><td><code>log file sync</code></td><td>A session waits for LGWR to write its redo at commit.</td><td>Very many small commits, or a slow disk.</td></tr>
+          <tr><td><code>log file parallel write</code></td><td>LGWR itself waits for its write to finish.</td><td>Disk speed. This is what <code>log file sync</code> is mostly made of.</td></tr>
+          <tr><td><code>log file switch (checkpoint incomplete)</code></td><td>LGWR wants to switch, but the next group is still ACTIVE. <strong>Every session that generates redo stops.</strong></td><td>Groups too small or too few for the redo rate.</td></tr>
+          <tr><td><code>log file switch (archiving needed)</code></td><td>The next group is not archived yet (ARCHIVELOG mode only).</td><td>Archiving cannot keep up.</td></tr>
+          <tr><td><code>log buffer space</code></td><td>The log buffer is full and LGWR cannot empty it fast enough.</td><td>A huge redo rate, or a slow redo disk.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note"><strong>The expensive one</strong> is <code>checkpoint incomplete</code>. The others slow down one session at a time. This one pauses everybody who wants to change anything, until DBWn catches up.</p>
+
+    <h2 id="simulator">Try it: when do commits stall?</h2>
+    <p>A simple model of the race. Each group fills in <em>size ÷ redo rate</em> seconds. A group needs a checkpoint of a certain length before it can be reused, and it has as long as LGWR takes to fill all the <em>other</em> groups. If that is not long enough, every switch stalls for the difference.</p>
+    <div class="sim" id="sim">
+      <div class="presets" role="group" aria-label="Presets">
+        <button type="button" data-preset="before">Our Oracle Free, before</button>
+        <button type="button" data-preset="after">After: 3 × 512 MB</button>
+        <button type="button" data-preset="busy">A busy production day</button>
+      </div>
+      <div class="sim-controls">
+        <label for="sim-groups"><span>Redo log groups <output id="out-groups"></output></span>
+          <input id="sim-groups" type="range" min="2" max="6" step="1" value="2"></label>
+        <label for="sim-size"><span>Size of each group <output id="out-size"></output></span>
+          <input id="sim-size" type="range" min="0" max="7" step="1" value="0"></label>
+        <label for="sim-rate"><span>Redo generated <output id="out-rate"></output></span>
+          <input id="sim-rate" type="range" min="0.5" max="20" step="0.5" value="3"></label>
+        <label for="sim-ckpt"><span>Checkpoint takes <output id="out-ckpt"></output></span>
+          <input id="sim-ckpt" type="range" min="1" max="120" step="0.5" value="3.6"></label>
+      </div>
+      <div>
+        <div class="timeline" id="timeline" aria-hidden="true"></div>
+        <div class="legend"><span><i style="background: var(--accent-soft); border: 1px solid var(--accent)"></i>LGWR filling a group</span><span><i style="background: var(--warn)"></i>all commits stalled</span><span>first 60 seconds shown</span></div>
+      </div>
+      <div class="verdict" id="verdict" role="status"></div>
+      <div class="stats">
+        <div><b id="st-fill"></b><small>to fill one group</small></div>
+        <div><b id="st-room"></b><small>time a group has for its checkpoint</small></div>
+        <div><b id="st-switch"></b><small>log switches per hour</small></div>
+        <div><b id="st-stall"></b><small>of the time stalled</small></div>
+      </div>
+      <p class="caption">The presets are illustrations, not measurements: we measured the waits on our Oracle, not its exact redo rate. Real checkpoints also speed up and slow down with load. The shape of the result is what matters.</p>
+    </div>
+
+    <h2 id="project">What we saw in this project</h2>
+    <p>During the performance runs (20,000 accounts, each producing an upgrade request, an outbox event, a welcome letter, more events and audit rows), the communication service could not go faster than about 140 letters a second, whether we ran one copy of it or two. Oracle's own wait statistics showed why.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Wait event</th><th class="num">Total wait</th><th class="num">Waits</th><th class="num">Average</th></tr></thead>
+        <tbody>
+          <tr><td><code>log file switch (checkpoint incomplete)</code></td><td class="num">204 s</td><td class="num">685</td><td class="num">297.5 ms</td></tr>
+          <tr><td><code>log file sync</code></td><td class="num">187 s</td><td class="num">120,022</td><td class="num">1.56 ms</td></tr>
+          <tr><td><code>resmgr:cpu quantum</code> (Oracle Free's 2-CPU cap)</td><td class="num">52 s</td><td class="num">624</td><td class="num">82.8 ms</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Two problems, one per row:</p>
+    <ul>
+      <li><strong>Tiny redo logs.</strong> Oracle Free ships with two groups of <strong>10&nbsp;MB</strong>. Under our load each filled in seconds, the other group's checkpoint was rarely done in time, and everything paused for about 0.3&nbsp;s at most switches.</li>
+      <li><strong>Too many commits.</strong> Every Kafka event was its own transaction, so about 120,000 commits each waited for LGWR.</li>
+    </ul>
+    <p>Fix 3 changed both at once: three groups of <strong>512&nbsp;MB</strong> (<code>infra/oracle-init/02-redo-logs.sql</code>), and up to 100 events per transaction in the shared Kafka consumer. In the next run of 20,000 accounts:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Measure</th><th class="num">Before</th><th class="num">After</th></tr></thead>
+        <tbody>
+          <tr><td>Log switches during the run</td><td class="num">hundreds</td><td class="num">0</td></tr>
+          <tr><td>Waits for <code>log file sync</code></td><td class="num">120,022</td><td class="num">2,969</td></tr>
+          <tr><td>Welcome letters created per second</td><td class="num">142</td><td class="num">276</td></tr>
+          <tr><td>Whole run, file to audit trail</td><td class="num">194 s</td><td class="num">115 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">Both changes went in together, so the improvement belongs to the pair. After it, Oracle's biggest wait was its own CPU cap, which a licensed Oracle does not have.</p>
+
+    <h2 id="sizing">Sizing redo logs</h2>
+    <ul>
+      <li><strong>Aim for a log switch every 15 to 20 minutes at the busiest time of day.</strong> Count your switches per hour (query below) and size from that.</li>
+      <li><strong>Have at least three groups.</strong> With two, the one LGWR wants next is always the one that was just being filled, and it has the least time to be checkpointed.</li>
+      <li><strong>Bigger does not mean more redo.</strong> The amount of redo depends only on the work done. Bigger files only mean fewer, calmer switches.</li>
+      <li><strong>Bigger does not mean slower recovery</strong>, as long as Oracle checkpoints continuously. The parameter <code>fast_start_mttr_target</code> lets you ask for a recovery time; with it set, <code>v$instance_recovery.optimal_logfile_size</code> suggests a size. On our local Oracle it is 0 (not set).</li>
+      <li><strong>Put redo on fast storage</strong> and keep it away from the data files. Every commit waits on it.</li>
+    </ul>
+    <p>You cannot resize a group. You add new groups of the new size, switch until the old ones are <span class="status inactive">INACTIVE</span>, and drop them. That is exactly what our script does.</p>
+
+    <h2 id="undo">Redo and undo</h2>
+    <p>The names are easy to mix up. Both are needed, for opposite jobs.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Redo</th><th>Undo</th></tr></thead>
+        <tbody>
+          <tr><td>Remembers</td><td>How to do a change again</td><td>How to take a change back</td></tr>
+          <tr><td>Kept in</td><td>Online redo log files (and archived copies)</td><td>Undo segments, inside the data files</td></tr>
+          <tr><td>Used for</td><td>Replaying committed work after a crash or restore; standby databases</td><td><code>ROLLBACK</code>; giving queries a consistent view while others change rows; rolling back unfinished work after a crash</td></tr>
+          <tr><td>Protected by</td><td>Being written to disk at commit</td><td>Redo (changes to undo blocks generate redo too)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="recovery">Crash recovery</h2>
+    <p>Say the machine loses power while transaction A has committed and transaction B is half way through. On the next start, Oracle repairs itself without any help:</p>
+    <ol class="steps">
+      <li><strong>Find the starting point.</strong> The control file records the last checkpoint. Everything before it is already in the data files.</li>
+      <li><strong>Roll forward.</strong> Oracle reads the redo from the checkpoint to the end of the current group and re-applies every change, committed or not. This also rebuilds the undo for B.</li>
+      <li><strong>Open the database.</strong> Users can work again; the next step happens in the background.</li>
+      <li><strong>Roll back.</strong> Using the undo, Oracle takes back everything B did, because B never committed.</li>
+    </ol>
+    <p>Result: A's changes are all there, B's are all gone. This is why only the redo between the last checkpoint and the end of the log has to survive a crash, and why <span class="status active">ACTIVE</span> groups must not be overwritten.</p>
+
+    <h2 id="archive">Archived redo logs</h2>
+    <p>Online redo logs only reach back to the last checkpoint. To recover from a lost disk, you need more: a backup of the data files <em>plus every change since that backup</em>. In <strong>ARCHIVELOG</strong> mode, an archiver process (<code>ARCn</code>) copies each group to an archive location after a switch, and Oracle will not reuse the group until the copy is made. With a backup and the archived logs you can:</p>
+    <ul>
+      <li>restore a lost data file and roll it forward to the moment of failure (media recovery),</li>
+      <li>restore to any earlier point in time, for example just before a bad deployment,</li>
+      <li>feed a standby database that replays the same redo (Data Guard),</li>
+      <li>read the changes as a stream: Oracle LogMiner, GoldenGate and Debezium all read redo. This is the change-data-capture option we mentioned for publishing the outbox table.</li>
+    </ul>
+    <p>Our local Oracle Free runs in <strong>NOARCHIVELOG</strong> mode, which is normal for a laptop: a crash is recovered, a lost disk is not. Every bank database runs in ARCHIVELOG mode.</p>
+
+    <h2 id="elsewhere">The same idea elsewhere</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>System</th><th>Its journal</th><th>Sizing knob</th></tr></thead>
+        <tbody>
+          <tr><td>PostgreSQL</td><td>WAL (write-ahead log), files in <code>pg_wal</code></td><td><code>max_wal_size</code>; too small gives "checkpoints are occurring too frequently"</td></tr>
+          <tr><td>MySQL (InnoDB)</td><td>Redo log</td><td><code>innodb_redo_log_capacity</code></td></tr>
+          <tr><td>Kafka</td><td>The topic partitions themselves are append-only logs</td><td>Segment size and retention</td></tr>
+          <tr><td>File systems (ext4, APFS)</td><td>A journal of metadata changes</td><td>Fixed by the file system</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Kafka is the closest relative. Our services already rely on it being an append-only log, and the transactional outbox works the same way in miniature: write the intention durably first, act on it later.</p>
+
+    <h2 id="queries">Look at it yourself</h2>
+    <p>Run these as SYS against the local Oracle: <code>docker compose exec -T oracle sqlplus -s / as sysdba</code>, then paste.</p>
+    <h3>The groups, their size and status</h3>
+    <pre><code>SELECT group#, members, ROUND(bytes/1024/1024) AS mb, status
+FROM   v$log
+ORDER  BY group#;</code></pre>
+    <h3>Where the files are</h3>
+    <pre><code>SELECT group#, member FROM v$logfile ORDER BY group#;</code></pre>
+    <h3>Log switches per hour (aim for about 3 to 4 at peak)</h3>
+    <pre><code>SELECT TO_CHAR(first_time, 'YYYY-MM-DD HH24') AS hour, COUNT(*) AS switches
+FROM   v$log_history
+WHERE  first_time &gt; SYSDATE - 1
+GROUP  BY TO_CHAR(first_time, 'YYYY-MM-DD HH24')
+ORDER  BY hour;</code></pre>
+    <h3>What sessions waited for since the database started</h3>
+    <pre><code>SELECT event, total_waits,
+       ROUND(time_waited_micro / 1e6) AS seconds,
+       ROUND(time_waited_micro / 1000 / GREATEST(total_waits, 1), 2) AS avg_ms
+FROM   v$system_event
+WHERE  wait_class &lt;&gt; 'Idle'
+ORDER  BY time_waited_micro DESC
+FETCH FIRST 10 ROWS ONLY;</code></pre>
+    <h3>Archive mode</h3>
+    <pre><code>SELECT log_mode FROM v$database;</code></pre>
+    <h3>The resize we did</h3>
+    <pre><code>docker compose exec -T oracle sqlplus -s / as sysdba &lt; infra/oracle-init/02-redo-logs.sql</code></pre>
+    <p>It adds groups 3 to 5 of 512&nbsp;MB, switches and checkpoints until groups 1 and 2 are no longer needed, and drops them. Run again, it does nothing. A fresh Oracle volume runs it on first start. Dropping a group leaves its file on disk, so <code>redo01.log</code> and <code>redo02.log</code> (10&nbsp;MB each) are still in <code>/opt/oracle/oradata/FREE</code>, unused.</p>
+
+    <h2 id="glossary">Glossary</h2>
+    <dl class="gloss">
+      <dt>redo record</dt><dd>The description of one or more block changes, written before the change counts as done.</dd>
+      <dt>change vector</dt><dd>One block-level change inside a redo record.</dd>
+      <dt>SCN</dt><dd>System change number: Oracle's logical clock. Every change and every commit gets one.</dd>
+      <dt>log buffer</dt><dd>The memory area where redo records wait for LGWR.</dd>
+      <dt>LGWR</dt><dd>Log writer: the process that writes the log buffer to the current redo log.</dd>
+      <dt>DBWn</dt><dd>Database writers: the processes that write changed blocks to the data files.</dd>
+      <dt>ARCn</dt><dd>Archivers: copy filled redo log groups in ARCHIVELOG mode.</dd>
+      <dt>group / member</dt><dd>A group is one slot in the redo circle; members are identical copies of it.</dd>
+      <dt>log switch</dt><dd>LGWR moving from a full group to the next.</dd>
+      <dt>checkpoint</dt><dd>The point up to which all changes are in the data files.</dd>
+      <dt>group commit</dt><dd>LGWR writing the redo of many committing sessions in one write.</dd>
+      <dt>NOLOGGING</dt><dd>An option that skips most redo for some bulk operations. Faster, but those changes cannot be recovered from redo; not for business data.</dd>
+    </dl>
+  </main>
+</div>
+
+<script>
+(function () {
+  var SIZES = [10, 50, 100, 200, 512, 1024, 2048, 4096];
+  var PRESETS = {
+    before: { groups: 2, size: 0, rate: 3, ckpt: 3.6 },
+    after:  { groups: 3, size: 4, rate: 3, ckpt: 3.6 },
+    busy:   { groups: 4, size: 5, rate: 1.5, ckpt: 45 }
+  };
+  var el = function (id) { return document.getElementById(id); };
+  var groups = el('sim-groups'), size = el('sim-size'), rate = el('sim-rate'), ckpt = el('sim-ckpt');
+
+  function fmtTime(s) {
+    if (s < 60) return (s < 10 ? s.toFixed(1) : Math.round(s)) + ' s';
+    if (s < 3600) return (s / 60).toFixed(s < 600 ? 1 : 0) + ' min';
+    return (s / 3600).toFixed(1) + ' h';
+  }
+  function fmtSize(mb) { return mb >= 1024 ? (mb / 1024) + ' GB' : mb + ' MB'; }
+
+  function render() {
+    var n = +groups.value, s = SIZES[+size.value], r = +rate.value, c = +ckpt.value;
+    el('out-groups').textContent = n;
+    el('out-size').textContent = fmtSize(s);
+    el('out-rate').textContent = r + ' MB/s';
+    el('out-ckpt').textContent = c + ' s';
+
+    var fill = s / r;
+    var room = (n - 1) * fill;
+    var stall = Math.max(0, c - room);
+    var cycle = fill + stall;
+    var perHour = 3600 / cycle;
+    var share = stall / cycle;
+
+    el('st-fill').textContent = fmtTime(fill);
+    el('st-room').textContent = fmtTime(room);
+    el('st-switch').textContent = perHour >= 100 ? Math.round(perHour).toLocaleString() : perHour.toFixed(1);
+    el('st-stall').textContent = (share * 100).toFixed(share > 0 && share < 0.1 ? 1 : 0) + ' %';
+
+    var verdict = el('verdict');
+    if (stall > 0) {
+      verdict.className = 'verdict bad';
+      verdict.textContent = 'Commits stall for about ' + fmtTime(stall) + ' at every log switch, ' + Math.round(perHour).toLocaleString()
+        + ' times an hour. Each group needs ' + fmtTime(c) + ' for its checkpoint but only gets ' + fmtTime(room) + '.';
+    } else {
+      var calm = fill * n >= 15 * 60 ? ' The switch rate is within the 15 to 20 minute guideline.' : ' No stalls, though switches come more often than the 15 to 20 minute guideline.';
+      verdict.className = 'verdict good';
+      verdict.textContent = 'No stalls: each group has ' + fmtTime(room) + ' for a checkpoint that needs ' + fmtTime(c) + '.' + calm;
+    }
+
+    var line = el('timeline');
+    line.textContent = '';
+    var t = 0, window60 = 60, parts = 0;
+    while (t < window60 && parts < 400) {
+      var f = Math.min(fill, window60 - t);
+      var seg = document.createElement('div');
+      seg.className = 'fill';
+      seg.style.flex = '0 0 ' + (f / window60 * 100) + '%';
+      line.appendChild(seg);
+      t += f; parts++;
+      if (t >= window60) break;
+      if (stall > 0) {
+        var st = Math.min(stall, window60 - t);
+        var stallSeg = document.createElement('div');
+        stallSeg.className = 'stall';
+        stallSeg.style.flex = '0 0 ' + (st / window60 * 100) + '%';
+        line.appendChild(stallSeg);
+        t += st; parts++;
+      }
+    }
+  }
+
+  [groups, size, rate, ckpt].forEach(function (input) { input.addEventListener('input', render); });
+  document.querySelectorAll('[data-preset]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var p = PRESETS[button.dataset.preset];
+      groups.value = p.groups; size.value = p.size; rate.value = p.rate; ckpt.value = p.ckpt;
+      render();
+    });
+  });
+  render();
+
+  document.querySelectorAll('pre').forEach(function (pre) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'copy';
+    button.textContent = 'Copy';
+    button.addEventListener('click', function () {
+      var text = pre.querySelector('code').textContent;
+      var done = function () { button.textContent = 'Copied'; setTimeout(function () { button.textContent = 'Copy'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { select(pre); });
+      } else {
+        select(pre);
+      }
+    });
+    pre.appendChild(button);
+  });
+  function select(pre) {
+    var range = document.createRange();
+    range.selectNodeContents(pre.querySelector('code'));
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+})();
+</script>
+</body>
+</html>
