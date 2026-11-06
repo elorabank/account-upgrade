@@ -2,6 +2,9 @@
 
 Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 
+Design: [high-level design](docs/hld.md) (architecture, flows, data, security, failure handling, risks) and the
+[decision records](docs/adr/README.md) (why it is built this way).
+
 | Module | Port | Purpose |
 |---|---|---|
 | common | - | Shared library: Kafka topics and event envelope, outbox + consumer template, scheduler locks, correlation id, Okta resource-server security |
