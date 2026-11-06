@@ -112,6 +112,13 @@ services:
       - keycloak
     restart: "no"
 
+  # Shared login sessions for the gateway (Spring Session), so a restart or a second gateway copy keeps people signed in
+  redis:
+    image: redis:7.4.2-alpine
+    command: ["redis-server", "--requirepass", "local-redis-pw", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+
   mailpit:
     image: axllent/mailpit:latest
     ports:

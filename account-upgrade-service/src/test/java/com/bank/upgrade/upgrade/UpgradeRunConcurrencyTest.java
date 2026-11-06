@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.bank.upgrade.common.persistence.outbox.OutboxEvent;
 import com.bank.upgrade.common.persistence.outbox.OutboxEventRepository;
 import com.bank.upgrade.test.OracleTestConfig;
+import com.bank.upgrade.test.RedisTestConfig;
 import com.bank.upgrade.upgrade.domain.UpgradeRequest;
 import com.bank.upgrade.upgrade.domain.UpgradeRequestRepository;
 import com.bank.upgrade.upgrade.gateway.AccountUpgradeGateway;
@@ -28,7 +29,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import reactor.core.publisher.Mono;
 
 /** The nightly run with many core calls in flight at once: faster, bounded, and nothing done twice or lost. */
-@Import({OracleTestConfig.class, UpgradeRunConcurrencyTest.SlowCoreConfig.class})
+@Import({OracleTestConfig.class, UpgradeRunConcurrencyTest.SlowCoreConfig.class, RedisTestConfig.class})
 @SpringBootTest(properties = {
     "bank.upgrade.gateway=test",
     "bank.upgrade.schedule.enabled=false",

@@ -16,6 +16,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param retryBackoff                  wait before the second inline try, doubled for the third
  * @param maxAttempts                   runs an account may fail transiently before it is marked FAILED
  * @param abortAfterConsecutiveFailures stop the run when this many accounts in a row cannot be reached (the core system is probably down)
+ * @param instanceId                    readable start of this copy's name (for example the pod name), used in leases and its
+ *                                      "run now" consumer group; a random part is always added, see the constructor
+ * @param lease                         how long a claim is held without renewal; a copy that dies loses its claims after this
+ * @param coreCallsPerSecond            core-system calls per second for ALL copies together (shared through Redis); 0 = no shared limit
  */
 @ConfigurationProperties("bank.upgrade")
 public record UpgradeProperties(
@@ -27,7 +31,20 @@ public record UpgradeProperties(
         @DefaultValue("3") int maxAttempts,
         @DefaultValue("5") int abortAfterConsecutiveFailures,
         @DefaultValue Rules rules,
-        @DefaultValue Simulated simulated) {
+        @DefaultValue Simulated simulated,
+        String instanceId,
+        @DefaultValue("2m") Duration lease,
+        @DefaultValue("0") int coreCallsPerSecond) {
+
+    /**
+     * The copy's name gets a new random part on every start. A process that restarts under the same pod name must not
+     * renew the leases its dead predecessor held (other copies could then never take them over), and must not rejoin
+     * the old consumer group and replay "run now" requests sent while it was down.
+     */
+    public UpgradeProperties {
+        String start = instanceId == null || instanceId.isBlank() ? "upgrade" : instanceId.strip();
+        instanceId = start + "-" + java.util.UUID.randomUUID().toString().substring(0, 6);
+    }
 
     /**
      * The simulated core system ({@code bank.upgrade.gateway=simulated}), for performance tests.

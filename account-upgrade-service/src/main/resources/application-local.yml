@@ -10,3 +10,7 @@ spring:
           service:
             client-id: account-upgrade-service
             client-secret: local-secret
+  data:
+    redis:
+      host: localhost
+      password: local-redis-pw

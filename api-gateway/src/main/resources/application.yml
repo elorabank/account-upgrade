@@ -28,6 +28,19 @@ spring:
             jwk-set-uri: ${bank.idp.issuer-uri}/protocol/openid-connect/certs
             user-info-uri: ${bank.idp.issuer-uri}/protocol/openid-connect/userinfo
             user-name-attribute: sub
+  # Login sessions (who is signed in, their tokens, a login in progress) live in Redis, not in this process.
+  # They hold access tokens: Redis must be private and password protected (TLS in the cloud).
+  data:
+    redis:
+      host: ${REDIS_HOST:redis-not-configured.invalid}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
+  session:
+    timeout: 30m                     # signed out after 30 minutes without activity
+    redis:
+      namespace: account-upgrade:gateway
   cloud:
     gateway:
       server:

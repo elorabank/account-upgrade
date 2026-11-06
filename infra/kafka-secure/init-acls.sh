@@ -13,13 +13,17 @@ user()  { $BIN/kafka-configs.sh --bootstrap-server $BOOT --command-config $CFG -
 produce() { acl --allow-principal "User:$1" --producer --topic "$2"; }                    # write
 consume() { acl --allow-principal "User:$1" --consumer --topic "$2" --group "$1"; }      # read, as the service's own consumer group
 park()    { acl --allow-principal "User:$1" --producer --topic "$2.DLT"; }               # write to the dead-letter topic of a topic it reads
+# read a broadcast topic: every copy has its own group, named "<service>-<instance id>"
+hear()    { acl --allow-principal "User:$1" --operation Read --operation Describe --topic "$2"
+            acl --allow-principal "User:$1" --operation Read --group "$1-" --resource-pattern-type prefixed; }
 
 FILE_LOADED=account.file-loaded; UPGRADED=account.upgraded; FAILED=account.upgrade-failed; REJECTED=account.upgrade-rejected
-SENT=notification.sent; NOTSENT=notification.failed; USER_ACTION=audit.user-action
+SENT=notification.sent; NOTSENT=notification.failed; USER_ACTION=audit.user-action; RUN_REQUESTED=upgrade.run-requested
 ING=file-ingestion-service; UPG=account-upgrade-service; COM=communication-service; AUD=audit-service
 ALL="$FILE_LOADED $UPGRADED $FAILED $REJECTED $SENT $NOTSENT $USER_ACTION"
 
 for t in $ALL; do topic "$t"; topic "$t.DLT"; done
+topic $RUN_REQUESTED   # a broadcast between upgrade copies: no dead-letter topic, the audit trail has run now already
 user $COM
 
 # ingestion: publishes file-loaded
@@ -27,6 +31,8 @@ produce $ING $FILE_LOADED;  produce $ING $USER_ACTION
 # upgrade: reads file-loaded, publishes upgraded / failed
 consume $UPG $FILE_LOADED;  park $UPG $FILE_LOADED
 produce $UPG $UPGRADED;     produce $UPG $FAILED;  produce $UPG $REJECTED; produce $UPG $USER_ACTION
+# ...and tells its other copies "run now"
+produce $UPG $RUN_REQUESTED; hear $UPG $RUN_REQUESTED
 # communication: reads upgraded, builds the letter, emails it, publishes sent / failed
 consume $COM $UPGRADED;     park $COM $UPGRADED
 produce $COM $SENT;         produce $COM $NOTSENT; produce $COM $USER_ACTION

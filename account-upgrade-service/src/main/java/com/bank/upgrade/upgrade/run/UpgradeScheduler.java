@@ -1,25 +1,27 @@
 package com.bank.upgrade.upgrade.run;
 
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import org.springframework.scheduling.annotation.Scheduled;
 
-/** Starts the daily upgrade. The cluster lock makes sure only one instance runs it. */
+/**
+ * Starts the daily upgrade on EVERY copy at 03:00. All copies derive the same run id from the time
+ * ({@code scheduled-2026-11-07T03:00}), so they join one run and share its work instead of each running its own.
+ */
 public class UpgradeScheduler {
 
-    /** Shared with "run now" (ManualRunner), so a manual and a scheduled run never overlap. */
-    public static final String LOCK_NAME = "accountUpgrade";
-    public static final java.time.Duration LOCK_AT_MOST_FOR = java.time.Duration.ofHours(4);
-
     private final UpgradeRunner runner;
+    private final ZoneId zone;
 
-    public UpgradeScheduler(UpgradeRunner runner) {
+    public UpgradeScheduler(UpgradeRunner runner, ZoneId zone) {
         this.runner = runner;
+        this.zone = zone;
     }
 
     /** 03:00 every day in the bank's time zone ({@code bank.time-zone}). */
     @Scheduled(cron = "${bank.upgrade.schedule.cron:0 0 3 * * *}", zone = "${bank.time-zone}")
-    @SchedulerLock(name = LOCK_NAME, lockAtMostFor = "PT4H", lockAtLeastFor = "PT1M")
     public void runDaily() {
-        runner.runOnce();
+        runner.runIfIdle("scheduled-" + LocalDateTime.now(zone).truncatedTo(ChronoUnit.MINUTES));
     }
 }

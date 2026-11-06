@@ -1,6 +1,7 @@
 package com.bank.upgrade.upgrade;
 
 import com.bank.upgrade.test.OracleTestConfig;
+import com.bank.upgrade.test.RedisTestConfig;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,7 +10,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.blockhound.BlockHound;
 
-@Import(OracleTestConfig.class)
+@Import({OracleTestConfig.class, RedisTestConfig.class})
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class AccountUpgradeApplicationTest {
 

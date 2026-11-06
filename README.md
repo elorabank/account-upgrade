@@ -16,7 +16,7 @@ Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 ## Run locally
 
 ```bash
-docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak
+docker compose up -d      # Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak, Redis
 mvn clean verify          # build and test (tests never connect to this Kafka; see the surefire setting in each service pom)
 SPRING_PROFILES_ACTIVE=local mvn -pl file-ingestion-service spring-boot:run
 ```
@@ -34,7 +34,8 @@ Run Maven with JDK 21 (BlockHound does not work on newer JDKs yet).
 Open the project folder (it is a Maven project). Shared run configurations are in `.run/`:
 `file-ingestion-service (local)`, `account-upgrade-service (local)`, `communication-service (local)`,
 `audit-service (local)`, `api-gateway (local)`, and `Upgrade flow (all services)`, which starts all five. They set `SPRING_PROFILES_ACTIVE=local` and short schedules
-(load every minute, upgrade at :30 past each minute).
+(load every minute, upgrade at :30 past each minute). `Extra upgrade copies` starts two more upgrade copies (ports
+8092 and 8102) next to them.
 The project SDK must be JDK 21, and annotation processing must be on (Lombok).
 
 ### Test data
@@ -54,7 +55,15 @@ call without a rule is refused. `/internal/**` is for services only (a scope, ne
 route it: today that is `GET /internal/files/{id}/accounts`, scope `staging.read`.
 
 The gateway signs people in (authorization code + PKCE), keeps the session, and passes the user's access token to the
-services. Signing out ends the session at the identity provider too. Postman and other systems can send
+services. Signing out ends the session at the identity provider too.
+
+**Sessions in Redis.** The gateway keeps login sessions (who is signed in, their tokens, a login in progress) in Redis
+through Spring Session, not in its own memory. Any gateway copy can serve any signed-in person, and a restart or
+redeploy signs nobody out. Sessions expire after 30 minutes without activity (`spring.session.timeout`). They hold
+access tokens, so Redis must be private and password protected, with TLS in the cloud: `REDIS_HOST`, `REDIS_PORT`,
+`REDIS_PASSWORD`, `REDIS_SSL`. Locally the `local` profile uses the compose Redis (password `local-redis-pw`). The
+gateway connects to Redis at startup, so it does not start without it. The upgrade service uses the same Redis for its
+shared core-call limit (see Account upgrade). Postman and other systems can send
 `Authorization: Bearer <token>` straight to the gateway.
 
 **Keycloak locally.** `docker compose up -d` starts Keycloak on http://localhost:8180 (admin console: admin / admin)
@@ -148,10 +157,34 @@ Try it locally: copy a file into the compose SFTP, then run the service with a s
 
 **Planning** happens when `account.file-loaded` arrives. The service streams that file's accounts from the ingestion service (`bank.upgrade.ingestion-url`) with its own client-credentials token (scope `staging.read`), and saves them in chunks of 500, each in its own short transaction. The next chunk is only requested once the previous one is saved, so the HTTP stream and the ingestion service's database reads go at the speed this service can write. It creates one `UPGRADE_REQUEST` per account for the business day: `PENDING` if eligible, `REJECTED` with the reason and an `account.upgrade-rejected` event if not. Each request keeps the file's correlation id, and the events the nightly run publishes for it carry that id. Delivering the same event twice, a stop half way, or a second file for the same day queues nothing twice. An unknown file goes straight to the dead-letter topic; anything else (ingestion down, file still loading) is retried with backoff.
 
-**The run** (`bank.upgrade.schedule.cron`, 03:00 in `bank.time-zone`, ShedLock `accountUpgrade`) claims `PENDING` requests in batches, calls the core system for each, and saves the result with its `account.upgraded` (or `account.upgrade-failed`) outbox event in one transaction.
-- The core call is made outside any database transaction, with an idempotency key `<account>:<businessDate>`. After a crash the request is still `IN_PROGRESS`, the next run queues it again and repeats the call.
+**The run** (`bank.upgrade.schedule.cron`, 03:00 in `bank.time-zone`) claims `PENDING` requests in batches, calls the core system for each, and saves the result with its `account.upgraded` (or `account.upgrade-failed`) outbox event in one transaction.
+- The core call is made outside any database transaction, with an idempotency key `<account>:<businessDate>`. After a crash the request is still `IN_PROGRESS`; once its lease runs out, another copy (or the next run) claims it again and repeats the call.
 - A core-system refusal fails that account at once. A temporary problem is retried `inline-attempts` times, then the account stays `PENDING` for the next run; after `max-attempts` runs it becomes `FAILED`.
 - If `abort-after-consecutive-failures` accounts in a row cannot be reached, the run stops so an outage does not use up every account's attempts.
+
+**Several copies.** Any number of copies of the service can work on one run together; there is no lock that leaves
+all but one idle.
+- *Leases.* A copy claims a batch with `FOR UPDATE SKIP LOCKED`, so two copies never get the same rows. It writes its
+  name and a lease end into each row (`CLAIMED_BY`, `CLAIMED_UNTIL`, `bank.upgrade.lease`, 2 minutes). While it works it
+  renews its leases every third of that time. A copy that dies stops renewing; once its leases run out, the next claim
+  by any copy takes those rows over and repeats the core call (same idempotency key). A copy only records a result for
+  a row it still holds. A copy with nothing left to claim does not stop while other copies still hold requests: it
+  looks again every few seconds, so the run ends only when nothing is in progress, and a copy that dies near the end
+  does not leave its share for the next night.
+- *Starting together.* Every copy has the same schedule, and each one joins that minute's run. "Run now" starts the
+  run on the copy that got the request and announces it on `upgrade.run-requested`. Each copy reads that topic in its
+  own consumer group (`account-upgrade-service-<copy name>`), so every copy hears it: a broadcast, not a queue. A copy
+  already busy with a run ignores it.
+- *One limit for all.* `bank.upgrade.concurrency` is per copy. The core team's limit is for everyone together, so set
+  `UPGRADE_CORE_CALLS_PER_SECOND` (`bank.upgrade.core-calls-per-second`): every copy counts its calls in Redis, one
+  counter per second, and waits for the next second once the counter is full. If Redis is unreachable the copies call
+  without the limit rather than stop. 0 (the default) means no shared limit.
+- *Names.* `UPGRADE_INSTANCE_ID` (for example the pod name) is the readable start of a copy's name; a random part is
+  added on every start. A restarted process therefore never renews its dead predecessor's leases and never replays old
+  run requests. Each start leaves an empty consumer group behind, which Kafka removes after a week.
+
+The service needs Redis (the same settings as the gateway, below) and connects to it at startup. Locally, start more
+copies with IntelliJ's `Extra upgrade copies` (ports 8092 and 8102) or with `SERVER_PORT=8092` on the command line.
 
 Draft rules (change under `bank.upgrade.rules` once the business confirms them): current type must be in `target-types` (`SAVINGS -> SAVINGS_PLUS`, `CURRENT -> CURRENT_PLUS`), KYC status must be `VERIFIED`, balance at least `min-balance` (0).
 
@@ -203,13 +236,27 @@ http://localhost:8080 (through the gateway, after signing in). It calls the same
 | Emails | search by status, account | Resend (ops admin, support) |
 | Audit | the audit trail by account, business action or event type | |
 
-Run now takes the same cluster lock as the schedule, so it answers 409 while that job is already running anywhere. Retry, resend and run now are recorded in the audit trail with the person's name.
+Run now for the load takes the same cluster lock as the schedule, so it answers 409 while a load is already running anywhere. Run now for the upgrade answers 409 while any copy holds a live lease, and otherwise starts the run on every copy. Retry, resend and run now are recorded in the audit trail with the person's name.
 
 **Signing in locally.** With the `local` profile the gateway signs people in with Keycloak. Use one of the test users
 from the Security section (password `local-pw`): `olivia.ops` sees and can do everything, `victor.view` only looks,
 `sam.support` can also resend emails, `ada.audit` sees files, upgrades and the audit trail. Sign out to switch user.
 
 **Working on the UI.** `cd ops-ui && npm run watch` rebuilds into `ops-ui/target/classes/static` on every save; with the gateway running from IntelliJ, reload the page. `mvn verify` builds it with its own Node (`node.version` in the parent pom) and type-checks it first.
+
+## Not done (learning project)
+
+Things a production system would need that this project leaves out on purpose:
+
+- **Retention and clean-up.** Nothing deletes old staging rows, letters, upgrade requests, Spring Batch history or
+  `PROCESSED_EVENT` rows (the outbox is the only table cleaned, after 7 days). At a million accounts a day that is
+  roughly 4 to 5 GB a day. Locally, `perf/reset.sh` starts from zero instead.
+- **Partitioning** of the big tables by day or month, so old data can be dropped instantly (in a licensed Oracle this
+  is the separately paid Partitioning option).
+- **Stored letter HTML.** Every letter keeps its full HTML (about 2 KB); storing the template version and the few
+  per-customer values, and rendering when needed, would be about ten times smaller.
+- **Audit archiving.** The audit trail grows forever; production would move old months to cheap storage.
+- **The real core-banking adapter**, the business's upgrade rules and letter wording, and the Excel layout.
 
 ## Performance tests (local only)
 

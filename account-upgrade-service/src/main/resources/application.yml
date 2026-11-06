@@ -25,20 +25,36 @@ spring:
           idp:
             token-uri: ${bank.idp.issuer-uri}/protocol/openid-connect/token
 
+  # Redis holds the core-call limit shared by all copies (bank.upgrade.core-calls-per-second)
+  data:
+    redis:
+      host: ${REDIS_HOST:redis-not-configured.invalid}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
+
+management:
+  health:
+    # Without Redis the limit is skipped (calls still capped per copy), so it does not make the service DOWN
+    redis:
+      enabled: false
+
 bank:
   processed-events:
     enabled: true      # shared PROCESSED_EVENT table (consumer de-duplication)
   outbox:
     enabled: true      # shared OUTBOX_EVENT table
-  scheduler-lock:
-    enabled: true      # SHEDLOCK table
   security:
     client:
       registration-id: service   # client-credentials token for calls to other services
   upgrade:
     ingestion-url: ${INGESTION_URL:http://localhost:8081}
     schedule:
-      cron: "0 0 3 * * *"      # daily at 03:00 in bank.time-zone
+      cron: "0 0 3 * * *"      # daily at 03:00 in bank.time-zone, on every copy (they share one run)
+    instance-id: ${UPGRADE_INSTANCE_ID:}           # start of this copy's name (e.g. the pod name); a random part is always added
+    lease: 2m                                      # a copy that dies loses its claims after this
+    core-calls-per-second: ${UPGRADE_CORE_CALLS_PER_SECOND:0}   # all copies together; 0 = no shared limit
     # Draft rules until the business confirms them
     rules:
       required-kyc-status: VERIFIED

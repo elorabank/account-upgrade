@@ -41,9 +41,11 @@ wait_for "requests planned" "sql \"select case when count(*) >= $LOADED then 'ye
   from UPG_OWNER.UPGRADE_REQUEST where business_date = date '$DAY';\"" "$LIMIT"
 
 echo "Upgrade (run now: $(run_now 8082 upgrade))"
-sleep 3
-wait_for "upgrade run finished" "sql \"select case when (select count(*) from UPG_OWNER.SHEDLOCK where name = 'accountUpgrade' and lock_until > systimestamp) = 0
-  then 'yes' else (select count(*) from UPG_OWNER.UPGRADE_REQUEST where business_date = date '$DAY' and status = 'UPGRADED') || ' upgraded' end from dual;\"" "$LIMIT"
+# Done when nothing is in progress and no request is still untried (one the run tried but could not finish keeps
+# the run's id and waits for the next run). Every running copy joins, so this counts all copies' work.
+wait_for "upgrade run finished" "sql \"select case when sum(case when status = 'IN_PROGRESS' or (status = 'PENDING' and run_id is null) then 1 else 0 end) = 0
+  then 'yes' else sum(case when status = 'UPGRADED' then 1 else 0 end) || ' upgraded' end
+  from UPG_OWNER.UPGRADE_REQUEST where business_date = date '$DAY';\"" "$LIMIT"
 UPGRADED=$(sql "select count(*) from UPG_OWNER.UPGRADE_REQUEST where business_date = date '$DAY' and status = 'UPGRADED';" | tr -d ' ')
 OF_DAY="upgrade_request_id in (select id from UPG_OWNER.UPGRADE_REQUEST where business_date = date '$DAY')"
 wait_for "emails sent" "sql \"select case when count(*) >= $UPGRADED and sum(case when status = 'PENDING' then 1 else 0 end) = 0 then 'yes'

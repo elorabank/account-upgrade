@@ -5,3 +5,4 @@ com.bank.upgrade.common.autoconfigure.ProcessedEventAutoConfiguration
 com.bank.upgrade.common.autoconfigure.ResourceServerSecurityAutoConfiguration
 com.bank.upgrade.common.autoconfigure.SchedulerLockAutoConfiguration
 com.bank.upgrade.common.autoconfigure.ServiceClientAutoConfiguration
+com.bank.upgrade.common.autoconfigure.RedisEagerConnectionAutoConfiguration

@@ -9,6 +9,7 @@ import com.bank.upgrade.common.messaging.EventSubscription;
 import com.bank.upgrade.common.persistence.outbox.OutboxEvent;
 import com.bank.upgrade.common.persistence.outbox.OutboxEventRepository;
 import com.bank.upgrade.test.OracleTestConfig;
+import com.bank.upgrade.test.RedisTestConfig;
 import com.bank.upgrade.upgrade.domain.UpgradeRequest;
 import com.bank.upgrade.upgrade.domain.UpgradeRequestRepository;
 import com.bank.upgrade.upgrade.gateway.AccountUpgradeGateway;
@@ -44,7 +45,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Planning from a FileLoaded event and the nightly run, against Oracle with a programmable stand-in for the core system. */
-@Import({OracleTestConfig.class, UpgradeFlowTest.FakesConfig.class})
+@Import({OracleTestConfig.class, UpgradeFlowTest.FakesConfig.class, RedisTestConfig.class})
 @SpringBootTest(properties = {
     "bank.upgrade.gateway=test",
     "bank.upgrade.schedule.enabled=false",
