@@ -3,7 +3,8 @@
 Spring Boot (WebFlux) microservices for the daily bank account upgrade.
 
 Design: [high-level design](docs/hld.md) (architecture, flows, data, security, failure handling, risks) and the
-[decision records](docs/adr/README.md) (why it is built this way).
+[decision records](docs/adr/README.md) (why it is built this way). The design also exists as a web page,
+`docs/hld.html`, generated from the Markdown: after changing `docs/hld.md`, run `python3 docs/build-hld-html.py`.
 
 | Module | Port | Purpose |
 |---|---|---|

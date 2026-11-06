@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account Upgrade HLD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,650&family=Public+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Same look as docs/redo-logs.html: a reading column with a sticky contents rail on wide screens. */
+:root {
+  --paper: #f7f8fa; --sheet: #ffffff; --ink: #1b2430; --muted: #5b6676; --rule: #dfe3ea;
+  --accent: #1f5fa8; --accent-soft: #e5eef9; --code-bg: #eef1f5;
+  --font-display: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12161c; --sheet: #191e26; --ink: #e5e9ef; --muted: #9aa5b4; --rule: #2b323d;
+    --accent: #7fb2ee; --accent-soft: #1d2c40; --code-bg: #20262f; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12161c; --sheet: #191e26; --ink: #e5e9ef; --muted: #9aa5b4; --rule: #2b323d;
+  --accent: #7fb2ee; --accent-soft: #1d2c40; --code-bg: #20262f; color-scheme: dark;
+}
+body {
+  margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-body); font-size: 1rem; line-height: 1.65;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+.page { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 900px) { .page { grid-template-columns: minmax(0, 1fr); gap: 0; } .toc { display: none; } }
+.toc { position: sticky; top: 24px; align-self: start; padding-top: 112px; font-size: 0.9rem; }
+.toc p { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; border-left: 1px solid var(--rule); }
+.toc a { display: block; padding: 2px 0 2px 12px; color: var(--muted); text-decoration: none; }
+.toc a:hover, .toc a:focus-visible { color: var(--accent); }
+main { min-width: 0; max-width: 900px; }
+header.lead { padding-block: 56px 24px; border-bottom: 1px solid var(--rule); margin-bottom: 8px; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.06em; color: var(--accent); margin: 0 0 12px; }
+h1 { font-family: var(--font-display); font-weight: 650; font-size: 2.1rem; line-height: 1.15; margin: 0 0 16px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 650; font-size: 1.5rem; line-height: 1.25; margin: 48px 0 12px; scroll-margin-top: 24px; }
+h3 { font-weight: 600; font-size: 1.2rem; margin: 28px 0 8px; scroll-margin-top: 24px; }
+p, li { max-width: 72ch; }
+.standfirst { font-size: 1.05rem; color: var(--muted); margin: 0; }
+a { color: var(--accent); }
+strong { font-weight: 600; }
+code { font-family: var(--font-mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+ul, ol { padding-left: 22px; display: grid; gap: 4px; }
+.figure { margin: 24px 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; overflow-x: auto; }
+.figure pre.mermaid { margin: 0; background: none; padding: 0; font-family: var(--font-body); text-align: center; }
+.figure pre.mermaid svg { max-width: 100%; height: auto; }
+.table-wrap { overflow-x: auto; margin: 16px 0; border: 1px solid var(--rule); border-radius: 10px; background: var(--sheet); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; background: var(--code-bg); }
+tr:last-child td { border-bottom: none; }
+pre { background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-family: var(--font-mono); font-size: 0.84rem; }
+footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 0.85rem; color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media print { .toc { display: none; } .page { display: block; } body { background: #fff; } .figure, .table-wrap { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <nav class="toc" aria-label="Contents">
+    <p>Contents</p>
+    <ol>
+      <li><a href="#1-purpose">1. Purpose</a></li>
+      <li><a href="#2-system-context">2. System context</a></li>
+      <li><a href="#3-services">3. Services</a></li>
+      <li><a href="#4-the-night-step-by-step">4. The night, step by step</a></li>
+      <li><a href="#5-integration">5. Integration</a></li>
+      <li><a href="#6-data">6. Data</a></li>
+      <li><a href="#7-security">7. Security</a></li>
+      <li><a href="#8-quality-attributes">8. Quality attributes</a></li>
+      <li><a href="#9-technology">9. Technology</a></li>
+      <li><a href="#10-environments-and-delivery">10. Environments and delivery</a></li>
+      <li><a href="#11-risks-and-open-items">11. Risks and open items</a></li>
+      <li><a href="#12-glossary">12. Glossary</a></li>
+    </ol>
+  </nav>
+  <main>
+    <header class="lead">
+      <p class="eyebrow">ACCOUNT UPGRADE PLATFORM · HIGH-LEVEL DESIGN</p>
+      <h1>High-level design</h1>
+      <p class="standfirst">The nightly upgrade of bank accounts, from the Excel file to the welcome email and the audit trail.
+      Generated from <code>docs/hld.md</code> on 2026-11-06: edit that file, then run <code>python3 docs/build-hld-html.py</code>.</p>
+    </header>
+<div class="table-wrap"><table><tbody><tr><td><strong>Status</strong></td><td>As built, November 2026 (<code>main</code> after PR #26). A learning project; see Risks and open items.</td></tr><tr><td><strong>Scope</strong></td><td>The nightly upgrade of bank accounts, from the Excel file to the welcome email and the audit trail, and the ops console around it</td></tr><tr><td><strong>Decisions</strong></td><td>The reasons behind this design are in the <a href="adr/README.md">decision records</a> (<a href="adr/0001-record-architecture-decisions.md">ADR-0001</a> to <a href="adr/0019-daily-retention-with-batched-deletes.md">ADR-0019</a>)</td></tr><tr><td><strong>Details</strong></td><td>How to run, configure and operate each part: <a href="../README.md">README</a></td></tr></tbody></table></div>
+<h2 id="1-purpose">1. Purpose</h2>
+<p>Every night the bank sends a file of accounts that are due for an upgrade (for example from <code>SAVINGS</code> to <code>SAVINGS_PLUS</code>). The platform:</p>
+<ol><li>loads the file and checks every row;</li><li>decides, per account, whether it is eligible, by the business's rules;</li><li>upgrades each eligible account in the core banking system;</li><li>emails each upgraded customer a welcome letter;</li><li>records every step in an audit trail;</li><li>lets the operations team watch all of this, and act on it, in an ops console.</li></ol>
+<h2 id="2-system-context">2. System context</h2>
+<figure class="figure"><pre class="mermaid">flowchart LR
+    export[&quot;Bank&#x27;s account export&lt;br/&gt;(daily Excel file)&quot;]
+    ops[&quot;Ops team&lt;br/&gt;(admins, viewers, support, auditors)&quot;]
+    customers[&quot;Customers&quot;]
+    subgraph platform [&quot;Account Upgrade Platform&quot;]
+        p[&quot;load, plan, upgrade,&lt;br/&gt;email, audit, ops console&quot;]
+    end
+    sftp[&quot;SFTP server&quot;]
+    core[&quot;Core banking system&quot;]
+    mail[&quot;Mail server&quot;]
+    idp[&quot;Identity provider&lt;br/&gt;(Keycloak; Okta or Auth0 possible)&quot;]
+    export -- &quot;accounts_yyyyMMdd.xlsx&quot; --&gt; sftp
+    sftp -- &quot;01:00 pickup&quot; --&gt; p
+    p -- &quot;upgrade, with an idempotency key&quot; --&gt; core
+    p -- &quot;welcome email&quot; --&gt; mail --&gt; customers
+    ops -- &quot;browser&quot; --&gt; p
+    p -- &quot;sign-in, tokens&quot; --&gt; idp</pre></figure>
+<div class="table-wrap"><table><thead><tr><th>External system</th><th>What the platform needs from it</th><th>Today</th></tr></thead><tbody><tr><td>SFTP server</td><td>an <code>incoming</code> folder with the daily file, <code>processed</code> and <code>error</code> folders</td><td>atmoz/sftp in docker-compose</td></tr><tr><td>Core banking system</td><td>an upgrade call that accepts an idempotency key</td><td><strong>simulated</strong> (<code>bank.upgrade.gateway=simulated</code>); the real adapter waits for the core team's API</td></tr><tr><td>Mail server</td><td>SMTP with STARTTLS</td><td>Mailpit in docker-compose</td></tr><tr><td>Identity provider</td><td>OIDC sign-in, client credentials, a <code>groups</code> claim, the audience <code>api://account-upgrade</code></td><td>Keycloak 26 (<a href="adr/0013-keycloak-and-provider-neutral-security.md">ADR-0013</a>)</td></tr></tbody></table></div>
+<h2 id="3-services">3. Services</h2>
+<figure class="figure"><pre class="mermaid">flowchart TB
+    browser[&quot;Ops console (React + TypeScript)&lt;br/&gt;in the browser&quot;]
+    subgraph platform [&quot;Account Upgrade Platform&quot;]
+        gw[&quot;api-gateway :8080&lt;br/&gt;sign-in, sessions, routing, serves the console&quot;]
+        ing[&quot;file-ingestion-service :8081&lt;br/&gt;load and check the file&quot;]
+        upg[&quot;account-upgrade-service :8082&lt;br/&gt;plan and upgrade; 1..n copies&quot;]
+        com[&quot;communication-service :8083&lt;br/&gt;letters and emails&quot;]
+        aud[&quot;audit-service :8085&lt;br/&gt;audit trail&quot;]
+    end
+    kafka[(&quot;Kafka&lt;br/&gt;business events&quot;)]
+    oracle[(&quot;Oracle&lt;br/&gt;one schema per service&quot;)]
+    redis[(&quot;Redis&lt;br/&gt;sessions, rate limit&quot;)]
+    sftp[&quot;SFTP&quot;]
+    core[&quot;Core banking&quot;]
+    mail[&quot;Mail server&quot;]
+    idp[&quot;Identity provider&quot;]
+    browser -- &quot;session cookie&quot; --&gt; gw
+    gw -- &quot;REST + person&#x27;s token&quot; --&gt; ing &amp; upg &amp; com &amp; aud
+    gw --- redis
+    gw --- idp
+    ing --- sftp
+    upg -- &quot;internal stream of a file&#x27;s accounts&quot; --&gt; ing
+    upg --- core
+    upg --- redis
+    com --- mail
+    ing &amp; upg &amp; com &amp; aud --- oracle
+    ing &amp; upg &amp; com &amp; aud --- kafka</pre></figure>
+<div class="table-wrap"><table><thead><tr><th>Service</th><th>Owns (Oracle schema)</th><th>Does</th><th>Runs</th></tr></thead><tbody><tr><td><code>file-ingestion-service</code></td><td><code>ING_OWNER</code>: file log, staging rows, rejected rows, Spring Batch records</td><td>picks up the file, loads it with Spring Batch, checks each row, announces <code>account.file-loaded</code>, streams a file's accounts to the upgrade service</td><td>01:00, one instance at a time (ShedLock, <a href="adr/0009-database-lock-for-scheduled-jobs.md">ADR-0009</a>)</td></tr><tr><td><code>account-upgrade-service</code></td><td><code>UPG_OWNER</code>: upgrade requests</td><td>plans requests from a loaded file (eligible or rejected), runs the upgrade against the core system</td><td>planning on each file; the run at 03:00 on every copy (<a href="adr/0010-upgrade-copies-share-a-run-through-leases.md">ADR-0010</a>)</td></tr><tr><td><code>communication-service</code></td><td><code>COM_OWNER</code>: letter templates, welcome letters</td><td>writes a letter for each upgrade, emails due letters, resend</td><td>continuously</td></tr><tr><td><code>audit-service</code></td><td><code>AUD_OWNER</code>: audit events</td><td>records every business event, search API</td><td>continuously</td></tr><tr><td><code>api-gateway</code></td><td>none (sessions in Redis)</td><td>signs people in, keeps their session, routes <code>/api/**</code> to the services with the person's token, serves the console</td><td>continuously</td></tr><tr><td><code>common</code> (library)</td><td>shared tables in each schema: outbox, processed events</td><td>outbox, consumer template, security rules, correlation ids, retention, metrics</td><td>—</td></tr></tbody></table></div>
+<p>Why it is split this way, and what that costs: <a href="adr/0003-one-service-per-step-one-schema-each.md">ADR-0003</a>. Why every service is reactive: <a href="adr/0002-reactive-services-with-webflux.md">ADR-0002</a>.</p>
+<h2 id="4-the-night-step-by-step">4. The night, step by step</h2>
+<p>All times are in <code>bank.time-zone</code> (default <code>Asia/Kolkata</code>), never the server's zone.</p>
+<div class="table-wrap"><table><thead><tr><th>Time</th><th>What happens</th></tr></thead><tbody><tr><td>01:00</td><td>Load: the ingestion service picks up <code>accounts_yyyyMMdd.xlsx</code> from SFTP</td></tr><tr><td>minutes later</td><td>Planning: the upgrade service turns the loaded accounts into upgrade requests</td></tr><tr><td>03:00</td><td>Upgrade run: every copy of the upgrade service joins; core-system calls</td></tr><tr><td>as upgrades finish</td><td>Letters are written and emailed; every event lands in the audit trail</td></tr><tr><td>05:30</td><td>Retention: every service deletes data older than its rules keep it (<a href="adr/0019-daily-retention-with-batched-deletes.md">ADR-0019</a>)</td></tr><tr><td>any time</td><td>Ops console: watch progress, run a job now, retry an upgrade, resend an email</td></tr></tbody></table></div>
+<h3 id="4-1-load-and-planning">4.1 Load and planning</h3>
+<figure class="figure"><pre class="mermaid">sequenceDiagram
+    autonumber
+    participant S as SFTP
+    participant I as ingestion
+    participant DI as ING schema
+    participant K as Kafka
+    participant U as upgrade
+    participant DU as UPG schema
+    Note over I: 01:00, under ShedLock
+    I-&gt;&gt;S: list incoming, download the file
+    I-&gt;&gt;DI: SHA-256 already loaded? (then move to error as .duplicate)
+    loop chunk by chunk (Spring Batch)
+        I-&gt;&gt;DI: valid rows, rejected rows and reader position, one transaction
+    end
+    I-&gt;&gt;DI: file COMPLETED and FileLoaded in the outbox, one transaction
+    I-&gt;&gt;S: move the file to processed
+    DI--&gt;&gt;K: outbox poller publishes account.file-loaded
+    K--&gt;&gt;U: account.file-loaded (file id, date, counts)
+    U-&gt;&gt;I: GET /internal/files/{id}/accounts (scope staging.read)
+    I--&gt;&gt;U: newline-delimited JSON, read page by page
+    loop chunks of 500
+        U-&gt;&gt;DU: requests PENDING or REJECTED (+ account.upgrade-rejected)
+    end</pre></figure>
+<p>Restart and duplicate handling: <a href="adr/0006-spring-batch-for-the-excel-load.md">ADR-0006</a> (Spring Batch), <a href="adr/0007-planning-pulls-accounts-over-http.md">ADR-0007</a> (the internal stream).</p>
+<h3 id="4-2-the-upgrade-run-with-several-copies">4.2 The upgrade run, with several copies</h3>
+<figure class="figure"><pre class="mermaid">sequenceDiagram
+    participant A as upgrade copy A
+    participant B as upgrade copy B
+    participant DB as UPG schema
+    participant R as Redis
+    participant C as Core banking
+    Note over A,B: 03:00 on every copy, or &quot;run now&quot; (broadcast on upgrade.run-requested)
+    A-&gt;&gt;DB: claim a batch (SKIP LOCKED), lease 2 min
+    B-&gt;&gt;DB: claim another batch
+    loop up to 50 calls in flight per copy
+        A-&gt;&gt;R: wait for a slot in the shared per-second limit
+        A-&gt;&gt;C: upgrade(key = account:businessDate)
+        A-&gt;&gt;DB: outcome + account.upgraded / upgrade-failed, only if A still holds the request
+    end
+    A-&gt;&gt;DB: renew own leases every 40 s
+    Note over B: B stops (crash, kill -9): its leases are no longer renewed
+    A-&gt;&gt;DB: claim again: B&#x27;s expired requests are taken over
+    Note over A: the run ends when nothing is in progress anywhere</pre></figure>
+<p>Outcomes: upgraded; refused (FAILED at once); unavailable (3 tries now, then the next run, FAILED after 3 runs). Five unreachable accounts in a row stop the run. Details: <a href="adr/0008-core-calls-outside-transactions.md">ADR-0008</a>, <a href="adr/0010-upgrade-copies-share-a-run-through-leases.md">ADR-0010</a>, <a href="adr/0011-run-now-broadcast-over-kafka.md">ADR-0011</a>, <a href="adr/0012-shared-core-call-limit-in-redis.md">ADR-0012</a>.</p>
+<h3 id="4-3-letters-emails-and-the-audit-trail">4.3 Letters, emails and the audit trail</h3>
+<figure class="figure"><pre class="mermaid">sequenceDiagram
+    participant K as Kafka
+    participant M as communication
+    participant DC as COM schema
+    participant SM as Mail server
+    participant AU as audit
+    K--&gt;&gt;M: account.upgraded
+    M-&gt;&gt;DC: letter PENDING from the newest active template (values escaped, account masked)
+    loop every few seconds
+        M-&gt;&gt;DC: lock due letters (SKIP LOCKED)
+        M-&gt;&gt;SM: send over several connections
+        M-&gt;&gt;DC: SENT + notification.sent, FAILED + notification.failed, or retry later (1, 2, 4, 8 min)
+    end
+    K--&gt;&gt;AU: every business event
+    AU-&gt;&gt;AU: one insert-only row per event, no personal data</pre></figure>
+<h3 id="4-4-an-action-in-the-ops-console">4.4 An action in the ops console</h3>
+<figure class="figure"><pre class="mermaid">sequenceDiagram
+    participant P as Person (browser)
+    participant G as api-gateway
+    participant S as service (e.g. upgrade)
+    participant K as Kafka
+    participant AU as audit
+    P-&gt;&gt;G: POST /api/upgrades/42/retry (session cookie, CSRF token)
+    G-&gt;&gt;G: session from Redis, access token
+    G-&gt;&gt;S: same request + Authorization: Bearer (person&#x27;s token)
+    S-&gt;&gt;S: token check, access rule: AU_OPS_ADMIN or scope upgrade.admin
+    S-&gt;&gt;S: request back to PENDING, audit.user-action in the outbox, one transaction
+    S--&gt;&gt;G: 202 Accepted
+    K--&gt;&gt;AU: audit.user-action (RETRY_UPGRADE, who, which account)</pre></figure>
+<h2 id="5-integration">5. Integration</h2>
+<h3 id="5-1-events-kafka">5.1 Events (Kafka)</h3>
+<p>Every event is written to the producing service's outbox in the same transaction as the change it announces (<a href="adr/0004-transactional-outbox.md">ADR-0004</a>), and every consumer handles it once, retries with backoff and parks what still fails on <code>&lt;topic&gt;.DLT</code> (<a href="adr/0005-idempotent-consumers-retries-dead-letters.md">ADR-0005</a>). Events are keyed by what they are about (usually the account), so one account's events stay in order.</p>
+<div class="table-wrap"><table><thead><tr><th>Topic</th><th>Producer</th><th>Consumers</th><th>Meaning</th></tr></thead><tbody><tr><td><code>account.file-loaded</code></td><td>ingestion</td><td>upgrade, audit</td><td>a file is completely loaded (id, date, counts)</td></tr><tr><td><code>account.upgrade-rejected</code></td><td>upgrade</td><td>audit</td><td>an account is not eligible, with the reason</td></tr><tr><td><code>account.upgraded</code></td><td>upgrade</td><td>communication, audit</td><td>the core system upgraded an account</td></tr><tr><td><code>account.upgrade-failed</code></td><td>upgrade</td><td>audit</td><td>refused, or gave up after the last attempt</td></tr><tr><td><code>notification.sent</code></td><td>communication</td><td>audit</td><td>a welcome email was accepted by the mail server</td></tr><tr><td><code>notification.failed</code></td><td>communication</td><td>audit</td><td>a welcome email failed for good</td></tr><tr><td><code>audit.user-action</code></td><td>ingestion, upgrade, communication</td><td>audit</td><td>a person ran a job, retried an upgrade or resent an email</td></tr><tr><td><code>upgrade.run-requested</code></td><td>upgrade</td><td>every upgrade copy (one group each)</td><td>"run now" broadcast (<a href="adr/0011-run-now-broadcast-over-kafka.md">ADR-0011</a>)</td></tr></tbody></table></div>
+<p>Every event has the same envelope: <code>eventId</code>, <code>eventType</code>, <code>correlationId</code>, <code>occurredAt</code>, <code>actor</code>, <code>data</code>. The correlation id also travels in HTTP headers (<code>X-Correlation-Id</code>) and every log line, so one business action (for example one file) can be followed across services, logs and the audit trail.</p>
+<h3 id="5-2-synchronous-calls">5.2 Synchronous calls</h3>
+<div class="table-wrap"><table><thead><tr><th>From</th><th>To</th><th>Call</th><th>Security</th></tr></thead><tbody><tr><td>Browser</td><td>gateway</td><td><code>/api/**</code>, <code>/me</code>, sign-in and sign-out</td><td>session cookie + CSRF token</td></tr><tr><td>gateway</td><td>each service</td><td>the same <code>/api/**</code> request</td><td>the person's access token (relayed)</td></tr><tr><td>upgrade</td><td>ingestion</td><td><code>GET /internal/files/{id}/accounts</code></td><td>the upgrade service's own token, scope <code>staging.read</code></td></tr><tr><td>upgrade</td><td>core banking</td><td>upgrade an account</td><td>to be defined with the core team</td></tr><tr><td>Prometheus</td><td>each service</td><td><code>GET /actuator/prometheus</code></td><td>Prometheus's own token, scope <code>metrics.read</code></td></tr></tbody></table></div>
+<h2 id="6-data">6. Data</h2>
+<p>Each service owns its schema and creates it with Liquibase; no service reads another's tables (<a href="adr/0003-one-service-per-step-one-schema-each.md">ADR-0003</a>).</p>
+<div class="table-wrap"><table><thead><tr><th>Schema</th><th>Main tables</th><th>Grows by</th><th>Kept (<a href="adr/0019-daily-retention-with-batched-deletes.md">ADR-0019</a>)</th></tr></thead><tbody><tr><td><code>ING_OWNER</code></td><td><code>FILE_INGESTION_LOG</code>, <code>ACCOUNT_STAGING</code>, <code>INGESTION_ERROR</code>, <code>BATCH_*</code></td><td>every row of every file</td><td>staging and completed Batch records 30 days; file list and rejected rows kept</td></tr><tr><td><code>UPG_OWNER</code></td><td><code>UPGRADE_REQUEST</code></td><td>every account every day</td><td>finished requests 400 days; pending never deleted</td></tr><tr><td><code>COM_OWNER</code></td><td><code>LETTER_TEMPLATE</code>, <code>WELCOME_LETTER</code> (full HTML, about 2 KB each)</td><td>every upgraded account</td><td>sent and failed letters 400 days</td></tr><tr><td><code>AUD_OWNER</code></td><td><code>AUDIT_EVENT</code> (insert-only, no personal data)</td><td>every business event</td><td>forever (archiving is an open item)</td></tr><tr><td>each of the above</td><td><code>OUTBOX_EVENT</code>, <code>PROCESSED_EVENT</code></td><td>every event sent / handled</td><td>outbox 7 days after publishing; processed events 30 days</td></tr></tbody></table></div>
+<p>Personal data: names and emails live in staging rows, upgrade requests and letters only, all with retention. Letters show only the last four digits of the account number. The audit trail holds codes, counts and masked text (<a href="adr/0015-insert-only-audit-trail-without-personal-data.md">ADR-0015</a>).</p>
+<h2 id="7-security">7. Security</h2>
+<div class="table-wrap"><table><thead><tr><th>Area</th><th>Design</th><th>ADR</th></tr></thead><tbody><tr><td>Identity</td><td>one OIDC provider; Keycloak locally, Okta or Auth0 by settings only</td><td>0013</td></tr><tr><td>People</td><td>sign in at the gateway (authorization code + PKCE); sessions in Redis; tokens never reach the browser</td><td>0014</td></tr><tr><td>Roles</td><td>groups in the token: <code>AU_OPS_ADMIN</code>, <code>AU_OPS_VIEWER</code>, <code>AU_SUPPORT</code>, <code>AU_AUDITOR</code></td><td>0013</td></tr><tr><td>Services</td><td>client credentials with narrow scopes: <code>staging.read</code>, <code>upgrade.read</code>, <code>upgrade.admin</code>, <code>audit.read</code>, <code>notification.resend</code>, <code>metrics.read</code></td><td>0013, 0016</td></tr><tr><td>Rules</td><td>one access matrix for every service (<code>ApiAccessRules</code>): unknown <code>/api/**</code> calls refused, <code>/internal/**</code> for scopes only; checked by <code>AccessMatrixTest</code></td><td>0013</td></tr><tr><td>Kafka</td><td>locally open; a secured profile with TLS, one SCRAM login per service and per-topic ACLs (<code>infra/kafka-secure</code>)</td><td>—</td></tr><tr><td>Secrets</td><td>local values are in the repo for local use only; every real secret comes from the environment (<code>IDP_CLIENT_SECRET</code>, <code>REDIS_PASSWORD</code>, <code>SMTP_PASSWORD</code>, <code>SFTP_PASSWORD</code> or a key, database passwords)</td><td>—</td></tr></tbody></table></div>
+<p>Who may do what:</p>
+<div class="table-wrap"><table><thead><tr><th>Action</th><th style="text-align:center">Ops admin</th><th style="text-align:center">Viewer</th><th style="text-align:center">Support</th><th style="text-align:center">Auditor</th><th>Service scope</th></tr></thead><tbody><tr><td>View files and upgrades</td><td style="text-align:center">✓</td><td style="text-align:center">✓</td><td style="text-align:center">✓</td><td style="text-align:center">✓</td><td><code>upgrade.read</code></td></tr><tr><td>View emails</td><td style="text-align:center">✓</td><td style="text-align:center">✓</td><td style="text-align:center">✓</td><td style="text-align:center"></td><td></td></tr><tr><td>Search the audit trail</td><td style="text-align:center">✓</td><td style="text-align:center"></td><td style="text-align:center"></td><td style="text-align:center">✓</td><td><code>audit.read</code></td></tr><tr><td>Run a job now, retry an upgrade</td><td style="text-align:center">✓</td><td style="text-align:center"></td><td style="text-align:center"></td><td style="text-align:center"></td><td><code>upgrade.admin</code></td></tr><tr><td>Resend an email</td><td style="text-align:center">✓</td><td style="text-align:center"></td><td style="text-align:center">✓</td><td style="text-align:center"></td><td><code>notification.resend</code></td></tr><tr><td>Read a file's accounts (internal)</td><td style="text-align:center"></td><td style="text-align:center"></td><td style="text-align:center"></td><td style="text-align:center"></td><td><code>staging.read</code></td></tr><tr><td>Read metrics</td><td style="text-align:center"></td><td style="text-align:center"></td><td style="text-align:center"></td><td style="text-align:center"></td><td><code>metrics.read</code></td></tr></tbody></table></div>
+<h2 id="8-quality-attributes">8. Quality attributes</h2>
+<h3 id="8-1-performance-local-one-laptop-simulated-core-system">8.1 Performance (local, one laptop, simulated core system)</h3>
+<div class="table-wrap"><table><thead><tr><th>Run</th><th>Result</th></tr></thead><tbody><tr><td>20,000 accounts, core at 50 ms, one copy, before tuning</td><td>1,245 s end to end</td></tr><tr><td>the same after three fixes (non-blocking core calls, parallel partitions, batched consuming)</td><td>115 s end to end; upgrade 39 s</td></tr><tr><td>20,000 accounts, three copies, shared limit 150 calls/s, one copy killed mid-run</td><td>all upgraded once; 176 s end to end</td></tr><tr><td>2,000 accounts, end-to-end check (2026-11-06)</td><td>18 s end to end</td></tr></tbody></table></div>
+<p>Not yet measured: a million accounts (the largest Excel file). On an 8 GB laptop the full stack plus monitoring is too much for honest numbers (<a href="adr/0016-monitoring-prometheus-grafana-alertmanager.md">ADR-0016</a>).</p>
+<h3 id="8-2-scaling">8.2 Scaling</h3>
+<div class="table-wrap"><table><thead><tr><th>Part</th><th>How it scales</th></tr></thead><tbody><tr><td>Upgrade run</td><td>more copies share the run through leases; <code>bank.upgrade.concurrency</code> calls in flight per copy; one shared rate limit for the core system</td></tr><tr><td>Kafka consumers</td><td>partitions are handled in parallel, each in order (6 partitions per topic locally)</td></tr><tr><td>Outbox pollers, email senders</td><td>any number of instances; <code>SKIP LOCKED</code> keeps them off each other's rows</td></tr><tr><td>Load</td><td>one file at a time by design (ShedLock); Spring Batch chunks of 500</td></tr><tr><td>Gateway</td><td>any number of copies; sessions in Redis</td></tr></tbody></table></div>
+<h3 id="8-3-what-happens-when-something-fails">8.3 What happens when something fails</h3>
+<div class="table-wrap"><table><thead><tr><th>Failure</th><th>Behaviour</th></tr></thead><tbody><tr><td>Core system down</td><td>3 quick retries per account, then the account waits for the next run; 5 unreachable in a row stop the run; FAILED after 3 runs</td></tr><tr><td>Core system refuses an account</td><td>that account FAILED at once with the reason; the others continue</td></tr><tr><td>An upgrade copy dies</td><td>its requests are taken over by other copies after the 2-minute lease</td></tr><tr><td>The service stops between the core call and saving it</td><td>the request stays IN_PROGRESS; after the lease it is called again with the same idempotency key</td></tr><tr><td>Mail server down</td><td>letters wait and are retried after 1, 2, 4, 8 minutes; FAILED after 5 attempts; not counted as the service being DOWN</td></tr><tr><td>An address the mail server rejects</td><td>that letter FAILED at once</td></tr><tr><td>Kafka down</td><td>events wait in the outboxes (alert <code>OutboxFallingBehind</code>) and are sent when Kafka is back</td></tr><tr><td>An event that keeps failing</td><td>parked on <code>&lt;topic&gt;.DLT</code> (alert <code>EventDeadLettered</code>); fix and replay</td></tr><tr><td>The same event twice</td><td>recorded once (processed-event table, unique keys)</td></tr><tr><td>A bad row in the file</td><td>rejected with its problems; the rest of the file loads</td></tr><tr><td>A file that cannot load (not a workbook, a column missing)</td><td>marked FAILED, moved to <code>error</code></td></tr><tr><td>The same file again (another name)</td><td>moved to <code>error</code> as <code>.duplicate</code></td></tr><tr><td>Load stopped half way</td><td>the next run resumes after the last committed chunk</td></tr><tr><td>Ingestion down during planning</td><td>the event is retried with backoff</td></tr><tr><td>Redis down</td><td>gateway: no sign-in; upgrade: calls go ahead without the shared limit (<a href="adr/0012-shared-core-call-limit-in-redis.md">ADR-0012</a>)</td></tr><tr><td>Oracle down</td><td>everything waits and retries; scheduled jobs try again at their next time</td></tr></tbody></table></div>
+<p>Delivery guarantees: events at least once, handled once; core calls at least once, made safe by the idempotency key; emails at least once (a crash after the mail server accepted but before the commit sends again).</p>
+<h3 id="8-4-observability">8.4 Observability</h3>
+<ul><li><strong>Metrics:</strong> every service exposes Micrometer metrics to Prometheus, including the pipeline's own (core calls by outcome, limit waits, finished requests, lease takeovers, outbox backlog, events by result, emails, retention).</li><li><strong>Dashboard:</strong> "Account upgrade" in Grafana, a file in the repo; sign-in through Keycloak.</li><li><strong>Alerts:</strong> seven rules (service down, dead-lettered event, Kafka lag, outbox stuck, core system unavailable, upgrade copy died, emails failing), emailed by Alertmanager (<a href="adr/0016-monitoring-prometheus-grafana-alertmanager.md">ADR-0016</a>).</li><li><strong>Tracing a business action:</strong> the correlation id in every event, HTTP call, log line and audit row.</li><li><strong>Audit trail:</strong> who did what and when, searchable by account, action, type or person (<a href="adr/0015-insert-only-audit-trail-without-personal-data.md">ADR-0015</a>).</li></ul>
+<h2 id="9-technology">9. Technology</h2>
+<div class="table-wrap"><table><thead><tr><th>Area</th><th>Choice</th><th>Version</th><th>Note</th></tr></thead><tbody><tr><td>Language</td><td>Java</td><td>21</td><td></td></tr><tr><td>Framework</td><td>Spring Boot, WebFlux</td><td>3.5.6</td><td><strong>out of free support since 2026-06-30</strong>; latest stable is 4.1 (Risks)</td></tr><tr><td>Gateway</td><td>Spring Cloud Gateway</td><td>Spring Cloud 2025.0.0</td><td></td></tr><tr><td>Kafka client</td><td>reactor-kafka</td><td>1.3.25</td><td>no longer developed by the Reactor team (Risks)</td></tr><tr><td>Batch</td><td>Spring Batch</td><td>5.x (with Boot 3.5)</td><td></td></tr><tr><td>Persistence</td><td>JPA (Hibernate), JDBC, Liquibase</td><td>with Boot 3.5</td><td></td></tr><tr><td>Database</td><td>Oracle</td><td>Free 23 locally</td><td>production edition and hosting to decide</td></tr><tr><td>Messaging</td><td>Apache Kafka</td><td>3.9</td><td></td></tr><tr><td>Cache / sessions</td><td>Redis</td><td>7.4</td><td></td></tr><tr><td>Identity</td><td>Keycloak</td><td>26.4</td><td>Okta or Auth0 possible</td></tr><tr><td>Excel</td><td>Apache POI, excel-streaming-reader</td><td>6.0</td><td></td></tr><tr><td>SFTP</td><td>sshj</td><td>0.41</td><td></td></tr><tr><td>Console</td><td>React, TypeScript, Vite</td><td>18.3, 5.6, 5.4</td><td>built by Maven with Node 22</td></tr><tr><td>Monitoring</td><td>Prometheus, Grafana, Alertmanager</td><td>3.15, 13.2, 0.34</td><td></td></tr><tr><td>Tests</td><td>JUnit 5, Mockito, Spring test slices, BlockHound</td><td></td><td>no containers or databases (<a href="adr/0017-tests-without-containers-or-databases.md">ADR-0017</a>)</td></tr></tbody></table></div>
+<h2 id="10-environments-and-delivery">10. Environments and delivery</h2>
+<div class="table-wrap"><table><thead><tr><th>Environment</th><th>What runs</th><th>How</th></tr></thead><tbody><tr><td>Local</td><td>the services (IntelliJ or <code>java -jar</code>), Oracle, Kafka, Kafka UI, SFTP, Mailpit, Keycloak, Redis, Prometheus, Alertmanager, Grafana</td><td><code>docker compose up -d</code>, profile <code>local</code>; <code>perf/run.sh</code> for end-to-end runs</td></tr><tr><td>CI</td><td>build, unit and API tests, coverage (JaCoCo), SonarCloud</td><td>GitHub Actions on every pull request into <code>main</code></td></tr><tr><td>Security checks</td><td>OWASP dependency-check, weekly</td><td>GitHub Actions; waiting for the <code>NVD_API_KEY</code> secret</td></tr><tr><td>Dependency updates</td><td>Dependabot, minor and patch only</td><td>paused (<a href="adr/0018-dependency-updates-minor-and-patch-only.md">ADR-0018</a>)</td></tr><tr><td>Cloud</td><td>not decided</td><td>planned for Google Cloud after local testing</td></tr></tbody></table></div>
+<p>Decisions the cloud move needs (to become ADRs): where Oracle runs (stay on-premises, or a VM with Oracle, or another database), Kafka (self-run or a managed service), Kubernetes (GKE) or Cloud Run, how secrets are stored, how Prometheus reaches the services (the scope, or a protected management port), and backups.</p>
+<h2 id="11-risks-and-open-items">11. Risks and open items</h2>
+<div class="table-wrap"><table><thead><tr><th>Item</th><th>Impact</th><th>Next step</th></tr></thead><tbody><tr><td>Spring Boot 3.5 has had no free fixes since 2026-06-30</td><td>security fixes missing</td><td>move to 3.5.16 now; plan the migration to 4.1 (Spring Framework 7, Jackson 3, Spring Batch 6, Hibernate 7)</td></tr><tr><td>reactor-kafka is no longer developed</td><td>blocks or complicates later upgrades</td><td>evaluate Spring Kafka, or the plain Kafka client on virtual threads, during the Boot 4 migration</td></tr><tr><td>Tests do not touch Oracle, Kafka or Redis (<a href="adr/0017-tests-without-containers-or-databases.md">ADR-0017</a>)</td><td>SQL, concurrency and broker behaviour are checked by hand only</td><td>a local end-to-end run before every release; consider a separate container suite</td></tr><tr><td>Core banking adapter, business rules, letter wording and Excel layout are drafts</td><td>not production-ready</td><td>needs the core team's API and the business's confirmed rules</td></tr><tr><td>Idempotency of the core system's API not confirmed</td><td>double upgrades on retries</td><td>confirm with the core team</td></tr><tr><td>Fail-open rate limit (<a href="adr/0012-shared-core-call-limit-in-redis.md">ADR-0012</a>)</td><td>a Redis outage can exceed the core team's limit</td><td>confirm fail-open or fail-closed with the core team</td></tr><tr><td>Retention periods are a starting point</td><td>keeping data too long or too short</td><td>confirm with compliance</td></tr><tr><td>Letters store full HTML</td><td>about 2 KB per letter</td><td>store the template version and values; render on demand (planned)</td></tr><tr><td>Audit trail grows forever</td><td>storage</td><td>archive old months (planned; design around the insert-only trigger)</td></tr><tr><td>No partitioning</td><td>deletes cost work; no instant drop of old days</td><td>partition the big tables by day or month (planned)</td></tr><tr><td>A million accounts not measured</td><td>unknown limits</td><td>run <code>perf/run.sh 1000000</code> on a machine with more memory</td></tr><tr><td>Dependabot paused, OWASP check waiting for a key</td><td>updates and vulnerabilities not reported</td><td>resume Dependabot; add <code>NVD_API_KEY</code></td></tr></tbody></table></div>
+<h2 id="12-glossary">12. Glossary</h2>
+<div class="table-wrap"><table><thead><tr><th>Term</th><th>Meaning</th></tr></thead><tbody><tr><td>Business date</td><td>the day a file is for (from its name), not the day it runs</td></tr><tr><td>Upgrade request</td><td>one account's upgrade for one business date: PENDING, IN_PROGRESS, UPGRADED, REJECTED or FAILED</td></tr><tr><td>Run</td><td>one pass of the upgrade over everything PENDING; several copies can share it</td></tr><tr><td>Copy</td><td>one running process of a service; the upgrade service is designed for several</td></tr><tr><td>Lease</td><td>a copy's time-limited claim on a request (<code>CLAIMED_BY</code>, <code>CLAIMED_UNTIL</code>)</td></tr><tr><td>Outbox</td><td>a table where events wait, written with the change they announce</td></tr><tr><td>DLT</td><td>dead-letter topic, <code>&lt;topic&gt;.DLT</code>, where events that keep failing are parked</td></tr><tr><td>Correlation id</td><td>the id that ties one business action together across services, events, logs and the audit trail</td></tr><tr><td>Scope / role</td><td>what a service's token / a person's groups allow</td></tr></tbody></table></div>
+    <footer>Source: <a href="hld.md">docs/hld.md</a> · Decisions: <a href="adr/README.md">docs/adr</a> · Generated 2026-11-06</footer>
+  </main>
+</div>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+  const dark = document.documentElement.dataset.theme === "dark"
+    || (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+  mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral", securityLevel: "strict",
+    fontFamily: getComputedStyle(document.body).fontFamily });
+  await mermaid.run({ querySelector: "pre.mermaid" });
+</script>
+</body>
+</html>
