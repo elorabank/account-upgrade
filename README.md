@@ -291,13 +291,31 @@ docker-compose, so try an image update locally before merging it.
 For pull requests that fix known vulnerabilities, also switch on *Dependabot alerts* and *security updates* in the
 repository's Settings > Advanced Security.
 
+## Retention (deleting old data)
+
+Every service with a database deletes what it no longer needs once a day, at 05:30 in `bank.time-zone`, after the
+nightly load, upgrade and emails (`RetentionRunner` in common). It deletes in batches of 10,000 rows, each in its own
+short transaction, so a big clean-up never holds long locks or fills Oracle's undo space.
+
+| Rule (`bank.retention.keep.<rule>`) | Service | Deletes | Kept |
+|---|---|---|---|
+| `staging` | ingestion | staging rows of loads that completed | 30 days |
+| `batch-history` | ingestion | Spring Batch's records of completed loads (failed loads stay: the next load restarts from them) | 30 days |
+| `upgrade-requests` | upgrade | upgraded, rejected and failed requests, by business date (pending and in-progress ones never) | 400 days |
+| `letters` | communication | sent and failed letters (pending ones never) | 400 days |
+| `processed-events` | upgrade, communication, audit | the consumers' de-duplication records (a redelivery comes within Kafka's 7 days) | 30 days |
+
+The file list and its rejected rows stay (small, and the console shows them); the outbox cleans itself after 7 days;
+the audit trail is append-only and is not deleted. Change a period with `bank.retention.keep.<rule>` (for example
+`BANK_RETENTION_KEEP_LETTERS=800d`), the time with `bank.retention.cron`, switch it off with
+`bank.retention.enabled=false`. Metric: `bank.retention.deleted` by rule. Every copy of a service runs it; that is safe
+(a row is deleted once). The periods are a starting point: how long a bank must keep what is a question for its
+compliance team.
+
 ## Not done (learning project)
 
 Things a production system would need that this project leaves out on purpose:
 
-- **Retention and clean-up.** Nothing deletes old staging rows, letters, upgrade requests, Spring Batch history or
-  `PROCESSED_EVENT` rows (the outbox is the only table cleaned, after 7 days). At a million accounts a day that is
-  roughly 4 to 5 GB a day. Locally, `perf/reset.sh` starts from zero instead.
 - **Partitioning** of the big tables by day or month, so old data can be dropped instantly (in a licensed Oracle this
   is the separately paid Partitioning option).
 - **Stored letter HTML.** Every letter keeps its full HTML (about 2 KB); storing the template version and the few

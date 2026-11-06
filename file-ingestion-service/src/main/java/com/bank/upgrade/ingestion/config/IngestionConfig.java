@@ -1,5 +1,9 @@
 package com.bank.upgrade.ingestion.config;
 
+import com.bank.upgrade.common.retention.RetentionRule;
+import com.bank.upgrade.ingestion.job.BatchHistoryPurge;
+import java.time.Duration;
+import java.time.ZoneId;
 import com.bank.upgrade.common.messaging.OutboxService;
 import com.bank.upgrade.ingestion.IngestionScheduler;
 import com.bank.upgrade.ingestion.IngestionService;
@@ -20,6 +24,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -68,5 +73,23 @@ public class IngestionConfig {
     @ConditionalOnProperty(prefix = "bank.ingestion.schedule", name = "enabled", havingValue = "true", matchIfMissing = true)
     IngestionScheduler ingestionScheduler(IngestionService service) {
         return new IngestionScheduler(service);
+    }
+
+    /**
+     * Staging rows are only needed until the upgrade service has planned the file (minutes after the load); kept
+     * 30 days for support. The file's entry and its rejected rows stay: they are small and the console shows them.
+     */
+    @Bean
+    RetentionRule stagingRetention(JdbcTemplate jdbc) {
+        return RetentionRule.olderThanTimestamp("staging", Duration.ofDays(30), jdbc, """
+            DELETE FROM ACCOUNT_STAGING WHERE FILE_ID IN
+              (SELECT ID FROM FILE_INGESTION_LOG WHERE STATUS = 'COMPLETED' AND COMPLETED_AT < ?)
+            AND ROWNUM <= ?""");
+    }
+
+    /** Spring Batch's records of completed loads, kept 30 days. */
+    @Bean
+    RetentionRule batchHistoryRetention(NamedParameterJdbcTemplate jdbc) {
+        return new RetentionRule("batch-history", Duration.ofDays(30), new BatchHistoryPurge(jdbc, ZoneId.systemDefault()));
     }
 }
