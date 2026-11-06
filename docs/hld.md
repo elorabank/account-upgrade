@@ -344,8 +344,8 @@ key; emails at least once (a crash after the mail server accepted but before the
 | Area | Choice | Version | Note |
 |---|---|---|---|
 | Language | Java | 21 | |
-| Framework | Spring Boot, WebFlux | 3.5.6 | **out of free support since 2026-06-30**; latest stable is 4.1 (Risks) |
-| Gateway | Spring Cloud Gateway | Spring Cloud 2025.0.0 | |
+| Framework | Spring Boot, WebFlux | 3.5.16 | the last free 3.5 release (2026-06-25); **no free fixes after 2026-06-30**; latest stable is 4.1 (Risks) |
+| Gateway | Spring Cloud Gateway | Spring Cloud 2025.0.3 | |
 | Kafka client | reactor-kafka | 1.3.25 | no longer developed by the Reactor team (Risks) |
 | Batch | Spring Batch | 5.x (with Boot 3.5) | |
 | Persistence | JPA (Hibernate), JDBC, Liquibase | with Boot 3.5 | |
@@ -377,7 +377,7 @@ Prometheus reaches the services (the scope, or a protected management port), and
 
 | Item | Impact | Next step |
 |---|---|---|
-| Spring Boot 3.5 has had no free fixes since 2026-06-30 | security fixes missing | move to 3.5.16 now; plan the migration to 4.1 (Spring Framework 7, Jackson 3, Spring Batch 6, Hibernate 7) |
+| Spring Boot 3.5 has had no free fixes since 2026-06-30 (on 3.5.16, the last one) | security fixes found since then are missing | migrate to 4.1 (Spring Framework 7, Jackson 3, Spring Batch 6, Hibernate 7), after replacing reactor-kafka |
 | reactor-kafka is no longer developed | blocks or complicates later upgrades | evaluate Spring Kafka, or the plain Kafka client on virtual threads, during the Boot 4 migration |
 | Tests do not touch Oracle, Kafka or Redis (ADR-0017) | SQL, concurrency and broker behaviour are checked by hand only | a local end-to-end run before every release; consider a separate container suite |
 | Core banking adapter, business rules, letter wording and Excel layout are drafts | not production-ready | needs the core team's API and the business's confirmed rules |
