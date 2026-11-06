@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Extra upgrade copies" type="CompoundRunConfigurationType">
+    <toRun name="account-upgrade-service copy 2 (local)" type="Application" />
+    <toRun name="account-upgrade-service copy 3 (local)" type="Application" />
+    <method v="2" />
+  </configuration>
+</component>

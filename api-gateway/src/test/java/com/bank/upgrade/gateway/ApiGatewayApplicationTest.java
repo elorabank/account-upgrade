@@ -1,5 +1,7 @@
 package com.bank.upgrade.gateway;
 
+import com.bank.upgrade.test.RedisTestConfig;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

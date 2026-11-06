@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.bank.upgrade.common.api.StagedAccount;
 import com.bank.upgrade.common.messaging.NonRetryableEventException;
 import com.bank.upgrade.test.OracleTestConfig;
+import com.bank.upgrade.test.RedisTestConfig;
 import com.bank.upgrade.upgrade.staging.StagingSource;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -29,7 +30,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
  * The real client with the real token wiring, against a small HTTP server playing both the token endpoint and the
  * ingestion service. Checks that a client-credentials token is fetched and sent, and how errors are classified.
  */
-@Import(OracleTestConfig.class)
+@Import({OracleTestConfig.class, RedisTestConfig.class})
 @SpringBootTest(properties = {"bank.upgrade.schedule.enabled=false", "bank.upgrade.gateway=simulated"})
 class IngestionStagingClientTest {
 

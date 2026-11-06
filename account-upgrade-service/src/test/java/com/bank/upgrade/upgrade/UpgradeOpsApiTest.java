@@ -4,16 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.bank.upgrade.common.persistence.outbox.OutboxEventRepository;
 import com.bank.upgrade.test.OracleTestConfig;
+import com.bank.upgrade.test.RedisTestConfig;
 import com.bank.upgrade.test.TestJwt;
 import com.bank.upgrade.upgrade.domain.UpgradeRequest;
 import com.bank.upgrade.upgrade.domain.UpgradeRequestRepository;
-import com.bank.upgrade.upgrade.run.UpgradeScheduler;
-import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
-import net.javacrumbs.shedlock.core.LockConfiguration;
-import net.javacrumbs.shedlock.core.LockProvider;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,7 +22,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /** The ops console's upgrade endpoints and "run now", through the real security chain. */
-@Import(OracleTestConfig.class)
+@Import({OracleTestConfig.class, RedisTestConfig.class})
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
     "bank.upgrade.schedule.enabled=false",
     "spring.security.oauth2.resourceserver.jwt.issuer-uri=" + TestJwt.ISSUER,
@@ -50,7 +46,6 @@ class UpgradeOpsApiTest {
     @Autowired WebTestClient client;
     @Autowired UpgradeRequestRepository requests;
     @Autowired OutboxEventRepository outbox;
-    @Autowired LockProvider locks;
     @Autowired JdbcTemplate jdbc;
 
     private final String viewer = JWT.user("AU_OPS_VIEWER");
@@ -146,13 +141,12 @@ class UpgradeOpsApiTest {
 
     @Test
     void runNowStartsTheUpgradeAndRefusesASecondAtTheSameTime() throws Exception {
-        var held = locks.lock(new LockConfiguration(Instant.now(), UpgradeScheduler.LOCK_NAME, Duration.ofMinutes(1), Duration.ZERO));
-        try {
-            client.post().uri("/api/jobs/upgrade/run").headers(h -> h.setBearerAuth(admin)).exchange()
-                .expectStatus().isEqualTo(409);
-        } finally {
-            held.get().unlock();
-        }
+        // Another copy is working on a run: it holds a live lease
+        var held = request("HELD", UpgradeRequest.IN_PROGRESS, DAY);
+        jdbc.update("UPDATE UPGRADE_REQUEST SET CLAIMED_BY = 'other-copy', CLAIMED_UNTIL = SYSTIMESTAMP + INTERVAL '5' MINUTE WHERE ID = ?", held.getId());
+        client.post().uri("/api/jobs/upgrade/run").headers(h -> h.setBearerAuth(admin)).exchange()
+            .expectStatus().isEqualTo(409);
+        jdbc.update("DELETE FROM UPGRADE_REQUEST WHERE ID = ?", held.getId());
 
         var pending = request("RN" + UUID.randomUUID().toString().substring(0, 4), UpgradeRequest.PENDING, DAY);
         client.post().uri("/api/jobs/upgrade/run").headers(h -> h.setBearerAuth(admin)).exchange()

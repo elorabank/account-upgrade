@@ -58,8 +58,17 @@ public class UpgradeRequest {
     @Column(name = "SOURCE_FILE_ID")
     private Long sourceFileId;
 
+    /** The run that claimed this request; several copies working on one run share it. */
     @Column(name = "RUN_ID", length = 36)
     private String runId;
+
+    /** The service copy that holds this request while IN_PROGRESS. */
+    @Column(name = "CLAIMED_BY", length = 100)
+    private String claimedBy;
+
+    /** The claim's lease: renewed while the copy works; after it, any copy may take the request over. */
+    @Column(name = "CLAIMED_UNTIL")
+    private Instant claimedUntil;
 
     /** The id of the business action that queued this request (the file's load), so its events can be traced back. */
     @Column(name = "CORRELATION_ID", length = 64)

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.bank.upgrade.test.OracleTestConfig;
+import com.bank.upgrade.test.RedisTestConfig;
 import com.bank.upgrade.upgrade.domain.UpgradeRequest;
 import com.bank.upgrade.upgrade.domain.UpgradeRequestRepository;
 import java.time.LocalDate;
@@ -13,7 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 
-@Import(OracleTestConfig.class)
+@Import({OracleTestConfig.class, RedisTestConfig.class})
 @SpringBootTest
 class UpgradePersistenceTest {
 

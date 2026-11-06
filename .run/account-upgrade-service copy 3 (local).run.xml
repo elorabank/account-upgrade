@@ -1,0 +1,16 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="account-upgrade-service copy 3 (local)" type="Application" factoryName="Application">
+    <envs>
+      <env name="SPRING_PROFILES_ACTIVE" value="local" />
+      <!-- Another copy of the upgrade service: same database, Kafka and Redis, its own port and name -->
+      <env name="SERVER_PORT" value="8102" />
+      <env name="UPGRADE_INSTANCE_ID" value="copy-3" />
+      <env name="BANK_UPGRADE_SCHEDULE_CRON" value="30 * * * * *" />
+    </envs>
+    <option name="MAIN_CLASS_NAME" value="com.bank.upgrade.upgrade.AccountUpgradeApplication" />
+    <module name="account-upgrade-service" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

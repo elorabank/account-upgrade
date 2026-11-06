@@ -98,6 +98,8 @@
         <configuration>
           <systemPropertyVariables>
             <bank.kafka.bootstrap-servers>127.0.0.1:1</bank.kafka.bootstrap-servers>
+            <!-- with no Kafka the outbox poller would hold its locked rows for the default 30 s before giving up -->
+            <bank.outbox.send-timeout>1s</bank.outbox.send-timeout>
           </systemPropertyVariables>
         </configuration>
       </plugin>

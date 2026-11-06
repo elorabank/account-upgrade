@@ -1,5 +1,7 @@
 package com.bank.upgrade.gateway;
 
+import com.bank.upgrade.test.RedisTestConfig;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockOAuth2Login;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.csrf;

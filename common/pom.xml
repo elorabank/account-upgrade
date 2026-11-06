@@ -49,6 +49,11 @@
       <optional>true</optional>
     </dependency>
     <dependency>
+      <groupId>org.springframework.data</groupId>
+      <artifactId>spring-data-redis</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
       <groupId>net.javacrumbs.shedlock</groupId>
       <artifactId>shedlock-spring</artifactId>
       <optional>true</optional>

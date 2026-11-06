@@ -6,7 +6,11 @@ import com.bank.upgrade.common.messaging.EventSubscription;
 import com.bank.upgrade.common.messaging.NonRetryableEventException;
 import com.bank.upgrade.common.messaging.OutboxService;
 import com.bank.upgrade.upgrade.domain.UpgradeRequestRepository;
+import com.bank.upgrade.common.messaging.KafkaClientProperties;
 import com.bank.upgrade.upgrade.gateway.AccountUpgradeGateway;
+import com.bank.upgrade.upgrade.gateway.CoreCallLimiter;
+import com.bank.upgrade.upgrade.gateway.RedisCoreCallLimiter;
+import com.bank.upgrade.upgrade.run.RunRequestListener;
 import com.bank.upgrade.upgrade.gateway.SimulatedAccountUpgradeGateway;
 import com.bank.upgrade.upgrade.plan.EligibilityRules;
 import com.bank.upgrade.upgrade.plan.UpgradePlanner;
@@ -16,12 +20,16 @@ import com.bank.upgrade.upgrade.staging.IngestionStagingClient;
 import com.bank.upgrade.upgrade.staging.StagingSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -74,16 +82,33 @@ public class UpgradeConfig {
         return new SimulatedAccountUpgradeGateway(properties.simulated().latency(), properties.simulated().failureRate());
     }
 
+    /** Core-system calls per second for all copies together, counted in Redis; or no shared limit. */
     @Bean
-    UpgradeRunner upgradeRunner(UpgradeRequestRepository requests, AccountUpgradeGateway gateway, OutboxService outbox,
-            UpgradeProperties properties, PlatformTransactionManager transactionManager, Clock clock) {
-        return new UpgradeRunner(requests, gateway, outbox, properties, transactionManager, clock);
+    CoreCallLimiter coreCallLimiter(UpgradeProperties properties, ObjectProvider<ReactiveStringRedisTemplate> redis, Clock clock) {
+        return properties.coreCallsPerSecond() > 0
+            ? new RedisCoreCallLimiter(redis.getObject(), properties.coreCallsPerSecond(), clock)
+            : CoreCallLimiter.none();
+    }
+
+    @Bean
+    UpgradeRunner upgradeRunner(UpgradeRequestRepository requests, AccountUpgradeGateway gateway, CoreCallLimiter limiter,
+            OutboxService outbox, UpgradeProperties properties, PlatformTransactionManager transactionManager,
+            JdbcTemplate jdbc, Clock clock) {
+        return new UpgradeRunner(requests, gateway, limiter, outbox, properties, transactionManager, jdbc, clock);
+    }
+
+    /** Every copy hears "run now" (its own consumer group) and joins the run in the background. */
+    @Bean
+    RunRequestListener runRequestListener(KafkaClientProperties kafka, UpgradeProperties properties, ObjectMapper mapper,
+            UpgradeRunner runner, @Value("${spring.application.name}") String service) {
+        return new RunRequestListener(kafka.consumerConfig(), service + "-" + properties.instanceId(), mapper,
+            runId -> Thread.ofVirtual().name("upgrade-run").start(() -> runner.runIfIdle(runId)));
     }
 
     /** Off in tests and in instances that should not run the nightly upgrade ({@code bank.upgrade.schedule.enabled=false}). */
     @Bean
     @ConditionalOnProperty(prefix = "bank.upgrade.schedule", name = "enabled", havingValue = "true", matchIfMissing = true)
-    UpgradeScheduler upgradeScheduler(UpgradeRunner runner) {
-        return new UpgradeScheduler(runner);
+    UpgradeScheduler upgradeScheduler(UpgradeRunner runner, @Value("${bank.time-zone}") String zone) {
+        return new UpgradeScheduler(runner, java.time.ZoneId.of(zone));
     }
 }

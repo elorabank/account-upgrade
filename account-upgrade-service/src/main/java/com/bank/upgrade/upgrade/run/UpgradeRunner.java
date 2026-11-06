@@ -12,7 +12,10 @@ import com.bank.upgrade.upgrade.gateway.AccountUpgradeGateway;
 import com.bank.upgrade.upgrade.gateway.GatewayRejectedException;
 import com.bank.upgrade.upgrade.gateway.GatewayUnavailableException;
 import com.bank.upgrade.upgrade.gateway.UpgradeCommand;
+import java.sql.PreparedStatement;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
@@ -24,25 +27,36 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.bank.upgrade.upgrade.gateway.CoreCallLimiter;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.retry.Retry;
 
 /**
- * The 03:00 run, as one reactive pipeline:
+ * One copy's share of an upgrade run, as one reactive pipeline:
  * <pre>
- *   claim PENDING requests, a batch at a time  (SKIP LOCKED, marked IN_PROGRESS for this run)
+ *   claim PENDING requests, a batch at a time  (SKIP LOCKED, marked IN_PROGRESS with this copy's lease)
  *     -> call the core system, up to {@code concurrency} accounts at once  (non-blocking, no thread waits)
  *     -> record the outcomes, up to 100 per transaction, each with its outbox event
  * </pre>
  * A new batch is only claimed when the calls need more work, and recording runs one transaction after another, so
  * the database sees a steady, bounded load however many calls are in flight.
  * <p>
+ * <b>Several copies.</b> Every copy of the service runs this at the same time with the same run id; they share the work
+ * because each claim locks different rows. A claim is a lease ({@code CLAIMED_BY}, {@code CLAIMED_UNTIL}) that the copy
+ * renews while it works. If a copy dies, its leases run out and another copy takes those requests over; a copy with
+ * nothing left to claim waits while others still hold requests, so the run ends only when all are done. A copy only
+ * records outcomes for requests it still holds, and if it stops early it hands back only its own claims. Core-system
+ * calls of all copies together can be held to a rate through Redis ({@link CoreCallLimiter}).
+ * <p>
  * The core call is made outside any database transaction, with the idempotency key {@code <account>:<businessDate>}.
- * If the service dies before an outcome is recorded, the request is still IN_PROGRESS; the next run puts it back to
- * PENDING and repeats the call, which the core system ignores because the key is the same.
+ * If a copy dies before an outcome is recorded, the request stays IN_PROGRESS until its lease runs out; then any copy
+ * claims it again and repeats the call, which the core system ignores because the key is the same.
  * <p>
  * A temporary core-system problem is retried a few times at once; if it persists the request stays PENDING for the
  * next run and counts one attempt, and after {@code maxAttempts} runs it becomes FAILED. If
@@ -54,7 +68,14 @@ public class UpgradeRunner {
     private static final Logger log = LoggerFactory.getLogger(UpgradeRunner.class);
     private static final int RECORD_BATCH = 100;
 
-    public record Summary(String runId, int upgraded, int failed, int deferred, int errors, boolean aborted) {}
+    public record Summary(String runId, String copy, int upgraded, int failed, int deferred, int errors, boolean aborted) {}
+
+    private static final String CLAIM_SQL = """
+        SELECT ID FROM UPGRADE_REQUEST
+        WHERE (STATUS = 'PENDING' AND (RUN_ID IS NULL OR RUN_ID <> ?))
+           OR (STATUS = 'IN_PROGRESS' AND (CLAIMED_UNTIL IS NULL OR CLAIMED_UNTIL < ?))
+        FOR UPDATE SKIP LOCKED
+        """;
 
     /** What a claimed request needs for its core call, read while claiming so the calls need no database reads. */
     record Claimed(long id, String accountNo, LocalDate businessDate, String currentType, String targetType, String correlationId) {}
@@ -65,34 +86,78 @@ public class UpgradeRunner {
 
     private final UpgradeRequestRepository requests;
     private final AccountUpgradeGateway gateway;
+    private final CoreCallLimiter limiter;
     private final OutboxService outbox;
     private final UpgradeProperties properties;
     private final TransactionTemplate tx;
+    private final JdbcTemplate jdbc;
     private final Clock clock;
+    private final String copy;
+    private final AtomicBoolean busy = new AtomicBoolean();
 
-    public UpgradeRunner(UpgradeRequestRepository requests, AccountUpgradeGateway gateway, OutboxService outbox,
-            UpgradeProperties properties, PlatformTransactionManager transactionManager, Clock clock) {
+    public UpgradeRunner(UpgradeRequestRepository requests, AccountUpgradeGateway gateway, CoreCallLimiter limiter,
+            OutboxService outbox, UpgradeProperties properties, PlatformTransactionManager transactionManager,
+            JdbcTemplate jdbc, Clock clock) {
+        this(requests, gateway, limiter, outbox, properties, transactionManager, jdbc, clock, properties.instanceId());
+    }
+
+    /** With an explicit copy name: tests use this to play several copies in one JVM. */
+    public UpgradeRunner(UpgradeRequestRepository requests, AccountUpgradeGateway gateway, CoreCallLimiter limiter,
+            OutboxService outbox, UpgradeProperties properties, PlatformTransactionManager transactionManager,
+            JdbcTemplate jdbc, Clock clock, String copy) {
         this.requests = requests;
         this.gateway = gateway;
+        this.limiter = limiter;
         this.outbox = outbox;
         this.properties = properties;
         this.tx = new TransactionTemplate(transactionManager);
+        this.jdbc = jdbc;
         this.clock = clock;
+        this.copy = copy;
     }
 
-    /** Blocks until the run is over. Called from the scheduler or "run now" thread, never an event-loop thread. */
+    public String copy() {
+        return copy;
+    }
+
+    /** True while this copy is working on a run. */
+    public boolean busy() {
+        return busy.get();
+    }
+
+    /** Joins the run unless this copy is already busy with one (a second trigger for the same run is then ignored). */
+    public java.util.Optional<Summary> runIfIdle(String runId) {
+        if (!busy.compareAndSet(false, true)) {
+            log.info("Already working on a run, not joining {}", runId);
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.of(run(runId));
+        } finally {
+            busy.set(false);
+        }
+    }
+
+    /** A run of its own, for tests and single-copy use. */
     public Summary runOnce() {
-        String runId = UUID.randomUUID().toString();
+        return runIfIdle(UUID.randomUUID().toString()).orElseThrow(() -> new IllegalStateException("This copy is busy"));
+    }
+
+    /** Blocks until this copy's share is done. Called from the scheduler or "run now" thread, never an event-loop thread. */
+    private Summary run(String runId) {
         try (var scope = CorrelationId.open(runId)) {
-            int reclaimed = tx.execute(s -> requests.reclaimInProgress());
-            if (reclaimed > 0) {
-                log.warn("{} request(s) were left in progress by an earlier run and are queued again", reclaimed);
-            }
+            log.info("Copy {} joins upgrade run {}", copy, runId);
             var stop = new AtomicBoolean();
             var unreachableInARow = new AtomicInteger();
             var counts = new Counts();
+            // Keep this copy's leases alive while it works; a copy that dies stops renewing and its leases run out
+            Disposable heartbeat = Flux.interval(properties.lease().dividedBy(3))
+                .onBackpressureDrop()
+                .concatMap(tick -> Mono.fromRunnable(this::renewLeases).subscribeOn(Schedulers.boundedElastic()), 1)
+                .subscribe();
 
-            Mono.fromCallable(() -> claim(runId)).subscribeOn(Schedulers.boundedElastic())
+            try {
+            nextBatch(runId, stop)
                 .repeat()
                 .takeWhile(batch -> !batch.isEmpty() && !stop.get())
                 .concatMapIterable(batch -> batch, 1)   // claim the next batch only when this one is used up
@@ -101,28 +166,91 @@ public class UpgradeRunner {
                 .bufferTimeout(RECORD_BATCH, Duration.ofMillis(200), true)   // waits for the recorder, never overflows
                 .concatMap(outcomes -> Mono.fromRunnable(() -> record(outcomes, counts)).subscribeOn(Schedulers.boundedElastic()))
                 .blockLast();
+            } finally {
+                heartbeat.dispose();
+            }
 
             if (stop.get()) {
-                // Claimed but never called: back to PENDING for the next run
-                tx.executeWithoutResult(s -> requests.releaseRun(runId));
+                // Claimed but never called: back to PENDING for the next run (only this copy's claims)
+                tx.executeWithoutResult(s -> requests.releaseClaims(copy));
             }
-            var summary = new Summary(runId, counts.upgraded.get(), counts.failed.get(), counts.deferred.get(),
+            var summary = new Summary(runId, copy, counts.upgraded.get(), counts.failed.get(), counts.deferred.get(),
                 counts.errors.get(), stop.get());
             log.info("Upgrade run finished: {}", summary);
             return summary;
         }
     }
 
+    /**
+     * The next batch to work on. When nothing is free but other copies still hold requests, waits and looks again: a
+     * live copy finishes its requests, and a dead copy's become free once its leases run out. So the run only ends
+     * when nothing is in progress anywhere, and a copy that dies near the end does not leave its share for tomorrow.
+     * Empty when the run is over, or when this copy is stopping.
+     */
+    private Mono<List<Claimed>> nextBatch(String runId, AtomicBoolean stop) {
+        return Mono.fromCallable(() -> claim(runId)).subscribeOn(Schedulers.boundedElastic())
+            .flatMap(batch -> {
+                if (!batch.isEmpty() || stop.get()) {
+                    return Mono.just(batch);
+                }
+                long heldByOthers = requests.countByStatusAndClaimedByNot(UpgradeRequest.IN_PROGRESS, copy);
+                if (heldByOthers == 0) {
+                    return Mono.just(batch);
+                }
+                log.info("Nothing left to claim; {} requests are still held by other copies, looking again in {}",
+                    heldByOthers, lookAgainAfter());
+                return Mono.delay(lookAgainAfter()).then(Mono.defer(() -> nextBatch(runId, stop)));
+            });
+    }
+
+    /** A sixth of the lease, between 100 ms and 10 s: soon enough after another copy finishes or its lease runs out. */
+    private Duration lookAgainAfter() {
+        Duration sixth = properties.lease().dividedBy(6);
+        Duration min = Duration.ofMillis(100);
+        Duration max = Duration.ofSeconds(10);
+        return sixth.compareTo(min) < 0 ? min : sixth.compareTo(max) > 0 ? max : sixth;
+    }
+
+    /**
+     * Locks the next batch for this copy: PENDING requests not yet tried in this run, and IN_PROGRESS ones whose lease
+     * ran out (their copy died). Oracle locks rows with SKIP LOCKED as they are fetched, and the fetch stops after
+     * batchSize rows, so concurrent copies each get the next free rows instead of tripping over each other's.
+     */
     private List<Claimed> claim(String runId) {
         return tx.execute(s -> {
-            var locked = requests.lockNextPending(runId, properties.batchSize());
-            return locked.stream().map(r -> {
+            Instant now = clock.instant();
+            List<Long> ids = jdbc.query(con -> {
+                PreparedStatement ps = con.prepareStatement(CLAIM_SQL);
+                ps.setString(1, runId);
+                ps.setObject(2, now.atOffset(ZoneOffset.UTC));
+                ps.setMaxRows(properties.batchSize());
+                ps.setFetchSize(properties.batchSize());
+                return ps;
+            }, (rs, n) -> rs.getLong(1));
+            if (ids.isEmpty()) {
+                return List.<Claimed>of();
+            }
+            Instant until = now.plus(properties.lease());
+            return requests.findAllById(ids).stream().map(r -> {
+                if (UpgradeRequest.IN_PROGRESS.equals(r.getStatus())) {
+                    log.warn("Taking over request {} from copy {} whose lease ran out", r.getId(), r.getClaimedBy());
+                }
                 r.setStatus(UpgradeRequest.IN_PROGRESS);
                 r.setRunId(runId);
+                r.setClaimedBy(copy);
+                r.setClaimedUntil(until);
                 return new Claimed(r.getId(), r.getAccountNo(), r.getBusinessDate(), r.getCurrentType(), r.getTargetType(),
                     r.getCorrelationId() != null ? r.getCorrelationId() : runId);
             }).toList();
         });
+    }
+
+    private void renewLeases() {
+        try {
+            tx.executeWithoutResult(s -> requests.renewClaims(copy, clock.instant().plus(properties.lease())));
+        } catch (RuntimeException e) {
+            log.warn("Could not renew leases of copy {}: {}", copy, e.toString());
+        }
     }
 
     /** One account's core call with its quick retries. Never fails: every problem becomes an outcome. */
@@ -131,7 +259,8 @@ public class UpgradeRunner {
             return Mono.just(new Outcome(r, Kind.SKIPPED, null));
         }
         var command = new UpgradeCommand(r.accountNo() + ":" + r.businessDate(), r.accountNo(), r.currentType(), r.targetType());
-        return Mono.defer(() -> gateway.upgrade(command))
+        // Each try first gets permission from the shared limit, then calls the core system
+        return Mono.defer(() -> limiter.acquire().then(Mono.defer(() -> gateway.upgrade(command))))
             .retryWhen(quickRetries())
             .thenReturn(new Outcome(r, Kind.UPGRADED, null))
             .onErrorResume(GatewayRejectedException.class, e -> Mono.just(new Outcome(r, Kind.REFUSED, e.getMessage())))
@@ -177,8 +306,15 @@ public class UpgradeRunner {
                 Map<Long, UpgradeRequest> byId = requests.findAllById(toSave.stream().map(o -> o.request().id()).toList())
                     .stream().collect(Collectors.toMap(UpgradeRequest::getId, Function.identity()));
                 for (Outcome o : toSave) {
+                    UpgradeRequest r = byId.get(o.request().id());
+                    if (r == null || !copy.equals(r.getClaimedBy()) || !UpgradeRequest.IN_PROGRESS.equals(r.getStatus())) {
+                        // This copy's lease ran out and another copy took the request over; its outcome counts
+                        log.warn("Request {} is no longer held by copy {}, not recording", o.request().id(), copy);
+                        counts.errors.incrementAndGet();
+                        continue;
+                    }
                     try (var scope = CorrelationId.open(o.request().correlationId())) {
-                        apply(byId.get(o.request().id()), o, counts);
+                        apply(r, o, counts);
                     }
                 }
             });
@@ -191,6 +327,8 @@ public class UpgradeRunner {
 
     private void apply(UpgradeRequest r, Outcome o, Counts counts) {
         r.setAttemptCount(r.getAttemptCount() + 1);
+        r.setClaimedBy(null);
+        r.setClaimedUntil(null);
         switch (o.kind()) {
             case UPGRADED -> {
                 r.setStatus(UpgradeRequest.UPGRADED);
