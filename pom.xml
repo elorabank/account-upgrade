@@ -41,7 +41,7 @@
     <node.version>v22.12.0</node.version>
     <jacoco.version>0.8.15</jacoco.version>
     <sonar-maven-plugin.version>5.7.0.6970</sonar-maven-plugin.version>
-    <dependency-check.version>12.2.2</dependency-check.version>
+    <dependency-check.version>13.0.0</dependency-check.version>
     <!-- Filled by JaCoCo's agent; empty when tests run without it -->
     <argLine></argLine>
     <!-- SonarCloud (CI, when the SONAR_TOKEN secret is set) -->
